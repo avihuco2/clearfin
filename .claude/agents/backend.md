@@ -120,6 +120,69 @@ export async function enqueueScrapeJob(userId: string, bankAccountId: string, tr
   if (!account) return Response.json({ error: 'Not found' }, { status: 404 })
   ```
 
+### `POST /api/scrape/otp` — Mandatory Ownership Check
+
+**CRITICAL:** Before writing an OTP code to Redis, always verify the `bankAccountId` belongs
+to the authenticated user. Failure to do so allows any authenticated user to inject an OTP
+into another user's active 2FA scrape session.
+
+```ts
+// app/api/scrape/otp/route.ts
+const OtpSchema = z.object({
+  bankAccountId: z.string().uuid(),
+  otpCode: z.string().min(4).max(8),
+})
+
+export async function POST(req: Request) {
+  const supabase = createRouteHandlerClient({ cookies })
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const parsed = OtpSchema.safeParse(await req.json())
+  if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 })
+
+  const { bankAccountId, otpCode } = parsed.data
+
+  // Ownership check — verify this account belongs to the authenticated user
+  const { data: account } = await supabase
+    .from('bank_accounts')
+    .select('id, scrape_status')
+    .eq('id', bankAccountId)
+    .eq('user_id', user.id)   // REQUIRED — prevents cross-user OTP injection
+    .eq('scrape_status', 'awaiting_otp')
+    .single()
+
+  if (!account) return Response.json({ error: 'Not found or not awaiting OTP' }, { status: 404 })
+
+  // Key includes userId to prevent collisions and enforce ownership at the Redis level
+  await redis.set(`otp:${user.id}:${bankAccountId}`, otpCode, { ex: 300 })
+  return Response.json({ ok: true })
+}
+```
+
+### `POST /api/scrape/trigger` — Rate Limiting
+
+Prevent unbounded job enqueuing — check for an existing active job before inserting:
+```ts
+const { data: existing } = await supabase
+  .from('scrape_jobs')
+  .select('id')
+  .eq('bank_account_id', bankAccountId)
+  .in('status', ['queued', 'running', 'awaiting_otp'])
+  .maybeSingle()
+if (existing) return Response.json({ error: 'Scrape already in progress' }, { status: 409 })
+```
+
+### Startup Key Validation
+
+Add to `apps/web/app/lib/crypto.ts` — validate the encryption key at module load time:
+```ts
+const key = process.env.CREDENTIALS_ENCRYPTION_KEY
+if (!key || Buffer.from(key, 'hex').length !== 32) {
+  throw new Error('CREDENTIALS_ENCRYPTION_KEY must be a 32-byte hex string')
+}
+```
+
 ## Environment Variables Used
 
 ```

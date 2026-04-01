@@ -51,7 +51,7 @@ CMD ["node", "src/index.js"]
 ```ts
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers'
 import { createClient } from '@supabase/supabase-js'
-import { decrypt } from '../../packages/crypto/src'
+import { decrypt } from '@clearfin/crypto'  // use workspace package — never relative paths across package boundaries
 import type { Job } from 'bullmq'
 
 const supabase = createClient(
@@ -96,7 +96,7 @@ export async function processScrapeJob(job: Job<ScrapeJobData>) {
     companyId: account.company_id as CompanyTypes,
     startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days back
     showBrowser: false,
-    twoFactorRetriever: async () => waitForOtp(bankAccountId),
+    twoFactorRetriever: async () => waitForOtp(userId, bankAccountId),
   })
 
   scraper.onProgress((companyId, { type }) => {
@@ -177,20 +177,24 @@ export async function processScrapeJob(job: Job<ScrapeJobData>) {
 Uses Supabase Realtime + Redis pub/sub to bridge the OTP from the user's browser to the running Puppeteer session:
 
 ```ts
-async function waitForOtp(bankAccountId: string, timeoutMs = 120_000): Promise<string> {
+async function waitForOtp(userId: string, bankAccountId: string, timeoutMs = 120_000): Promise<string> {
   // Signal the frontend that OTP is needed
   await supabase.from('bank_accounts').update({ scrape_status: 'awaiting_otp' }).eq('id', bankAccountId)
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('OTP_TIMEOUT')), timeoutMs)
 
+    // Key includes userId to match the key written by POST /api/scrape/otp,
+    // preventing cross-user OTP injection (a user cannot claim another user's bankAccountId).
+    const redisKey = `otp:${userId}:${bankAccountId}`
+
     // Poll Redis for OTP submission every 5 seconds (loop skill equivalent)
     const interval = setInterval(async () => {
-      const otp = await redis.get(`otp:${bankAccountId}`)
+      const otp = await redis.get(redisKey)
       if (otp) {
         clearTimeout(timer)
         clearInterval(interval)
-        await redis.del(`otp:${bankAccountId}`)
+        await redis.del(redisKey)
         resolve(otp as string)
       }
     }, 5000)
@@ -212,6 +216,13 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 })
 
+// Validate required env vars at startup — fail fast before accepting any jobs
+const encKey = process.env.CREDENTIALS_ENCRYPTION_KEY
+if (!encKey || Buffer.from(encKey, 'hex').length !== 32) {
+  console.error('FATAL: CREDENTIALS_ENCRYPTION_KEY must be a 32-byte hex string')
+  process.exit(1)
+}
+
 const worker = new Worker('scrape', processScrapeJob, {
   connection: redis,
   concurrency: parseInt(process.env.WORKER_CONCURRENCY ?? '3'),
@@ -219,6 +230,14 @@ const worker = new Worker('scrape', processScrapeJob, {
 
 worker.on('failed', (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message)  // message only, no credentials
+})
+
+// Graceful shutdown — Railway sends SIGTERM before stopping the container.
+// Close the worker so in-flight jobs complete before the process exits,
+// preventing scrape_status from being stuck in 'running' or 'awaiting_otp'.
+process.on('SIGTERM', async () => {
+  await worker.close()
+  process.exit(0)
 })
 
 console.log('Scraper worker started')

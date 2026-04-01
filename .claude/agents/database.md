@@ -155,6 +155,15 @@ alter table public.scrape_jobs enable row level security;
 create policy "users can read own scrape_jobs"
   on public.scrape_jobs for select
   using (auth.uid() = user_id);
+-- INSERT and UPDATE policies are required even though the worker uses service_role.
+-- If application code ever creates/updates jobs via an anon-scoped client, tenant
+-- isolation must be enforced at the DB level — not assumed from the caller.
+create policy "users can insert own scrape_jobs"
+  on public.scrape_jobs for insert
+  with check (auth.uid() = user_id);
+create policy "users can update own scrape_jobs"
+  on public.scrape_jobs for update
+  using (auth.uid() = user_id);
 ```
 
 ## Hebrew Category Seeds

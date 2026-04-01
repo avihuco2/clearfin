@@ -64,8 +64,10 @@ import { redirect } from 'next/navigation'
 
 export default async function DashboardLayout({ children }) {
   const supabase = createServerComponentClient({ cookies })
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/login')
+  // IMPORTANT: always use getUser() — it re-validates the JWT with the Supabase Auth server.
+  // getSession() only reads the local cookie and can be bypassed with a tampered/replayed token.
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (!user || error) redirect('/login')
   return <>{children}</>
 }
 ```

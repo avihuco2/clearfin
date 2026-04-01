@@ -1,0 +1,41 @@
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# OS metadata
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+**/node_modules/
+
+# Next.js
+.next/
+out/
+build/
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Railway / Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
