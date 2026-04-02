@@ -33,8 +33,17 @@ Build the invitation flow end-to-end:
 Build the admin panel for managing banks, credit cards, and scraping:
 1. `frontend` agent — build `/[tenantSlug]/admin/accounts` and `/[tenantSlug]/admin/accounts/new`
 2. Credential form renders dynamic fields based on selected `CompanyTypes`
-3. Scrape trigger button with real-time job status via Supabase Realtime
-4. OTP modal shown automatically when `scrape_status = 'awaiting_otp'`
+3. If 1Password is configured, show credential store selector (local vs 1Password)
+4. Scrape trigger button with real-time job status via Supabase Realtime
+5. OTP modal shown automatically when `scrape_status = 'awaiting_otp'`
+
+### `/tenant integrations`
+Configure external integrations for the tenant (currently: 1Password):
+1. `database` agent — verify `tenant_integrations` table and `credential_store` enum exist
+2. `backend` agent — implement integration routes: save token, test connection, delete
+3. `frontend` agent — build `/[tenantSlug]/admin/integrations` and `/[tenantSlug]/admin/integrations/1password`
+4. `security` agent — audit that service account tokens are encrypted at rest and never logged
+5. `scraper-worker` agent — verify credential resolver handles both `local` and `1password` stores
 
 ---
 
@@ -62,6 +71,8 @@ tenants
 | Invite / remove members | ✅ | ❌ |
 | Change member roles | ✅ | ❌ |
 | Create custom categories | ✅ | ❌ |
+| Configure 1Password integration | ✅ | ❌ |
+| Choose credential store per account | ✅ | ❌ |
 | Update tenant settings | ✅ | ❌ |
 | Delete tenant | ✅ | ❌ |
 

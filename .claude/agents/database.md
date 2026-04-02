@@ -270,8 +270,46 @@ create policy "tenant admins can delete categories"
   );
 ```
 
+### tenant_integrations
+Stores external credential-store configurations per tenant (e.g. 1Password service account token).
+The service account token is itself encrypted with AES-256-GCM using the server key.
+
+```sql
+create type public.integration_provider as enum ('1password');
+
+create table public.tenant_integrations (
+  id                    uuid primary key default gen_random_uuid(),
+  tenant_id             uuid not null references public.tenants(id) on delete cascade,
+  provider              public.integration_provider not null,
+  -- Encrypted service-account token (AES-256-GCM, same scheme as bank credentials)
+  encrypted_token       text not null,
+  token_iv              text not null,
+  token_tag             text not null,
+  -- Provider-specific config (non-secret); e.g. vault name / vault UUID for 1Password
+  config                jsonb not null default '{}',
+  enabled               boolean not null default true,
+  created_by            uuid not null references auth.users(id),
+  created_at            timestamptz not null default now(),
+  unique(tenant_id, provider)  -- one integration per provider per tenant
+);
+alter table public.tenant_integrations enable row level security;
+
+-- All tenant members can see which integrations are configured (but not the token)
+create policy "tenant members can read integrations"
+  on public.tenant_integrations for select
+  using (public.is_tenant_member(tenant_id));
+
+-- Only admins can create/update/delete integrations
+create policy "tenant admins can manage integrations"
+  on public.tenant_integrations for all
+  using (public.is_tenant_admin(tenant_id))
+  with check (public.is_tenant_admin(tenant_id));
+```
+
 ### bank_accounts
 ```sql
+create type public.credential_store as enum ('local', '1password');
+
 create table public.bank_accounts (
   id                    uuid primary key default gen_random_uuid(),
   tenant_id             uuid not null references public.tenants(id) on delete cascade,
@@ -281,14 +319,28 @@ create table public.bank_accounts (
   display_name          text,
   balance               numeric(14,2),
   balance_updated_at    timestamptz,
-  encrypted_credentials text not null,
-  credentials_iv        text not null,
-  credentials_tag       text not null,
+  -- Credential storage: 'local' (AES-256-GCM in DB) or '1password' (item ref in vault)
+  credential_store      public.credential_store not null default 'local',
+  -- Used when credential_store = 'local'
+  encrypted_credentials text,
+  credentials_iv        text,
+  credentials_tag       text,
+  -- Used when credential_store = '1password': the 1Password item UUID
+  external_credential_ref text,
   last_scraped_at       timestamptz,
   scrape_status         text not null default 'idle',  -- idle|queued|running|awaiting_otp|error
   scrape_error          text,
   created_at            timestamptz not null default now(),
-  unique(tenant_id, company_id, account_number)
+  unique(tenant_id, company_id, account_number),
+  -- Enforce: local store must have encrypted fields; 1password store must have ref
+  constraint local_credentials_required check (
+    credential_store != 'local'
+    or (encrypted_credentials is not null and credentials_iv is not null and credentials_tag is not null)
+  ),
+  constraint external_ref_required check (
+    credential_store != '1password'
+    or external_credential_ref is not null
+  )
 );
 alter table public.bank_accounts enable row level security;
 
@@ -518,11 +570,12 @@ insert into public.categories (id, tenant_id, name_he, name_en, icon, color) val
 
 ```
 supabase/migrations/
-  20240101000000_initial_schema.sql       # profiles, tenants, memberships, invitations
-  20240101000001_tenant_data_tables.sql   # categories, bank_accounts, transactions, scrape_jobs
-  20240101000002_helper_functions.sql     # is_tenant_admin, is_tenant_member
-  20240101000003_seed_categories.sql      # Hebrew system categories
-  20240101000004_<feature>.sql            # future migrations
+  20240101000000_initial_schema.sql         # profiles, tenants, memberships, invitations
+  20240101000001_tenant_data_tables.sql     # categories, bank_accounts, transactions, scrape_jobs
+  20240101000002_helper_functions.sql       # is_tenant_admin, is_tenant_member
+  20240101000003_seed_categories.sql        # Hebrew system categories
+  20240101000004_tenant_integrations.sql    # tenant_integrations, credential_store enum on bank_accounts
+  20240101000005_<feature>.sql              # future migrations
 ```
 
 ## Workflow

@@ -175,10 +175,12 @@ useEffect(() => {
 |---|---|---|
 | `/[tenantSlug]/admin` | admin | Admin overview: accounts, jobs, member count |
 | `/[tenantSlug]/admin/accounts` | admin | Bank & credit card accounts list |
-| `/[tenantSlug]/admin/accounts/new` | admin | Add bank/credit card — select institution, enter credentials |
+| `/[tenantSlug]/admin/accounts/new` | admin | Add bank/credit card — select institution, enter credentials, pick credential store |
 | `/[tenantSlug]/admin/accounts/[id]` | admin | Account detail: scrape history, re-authenticate |
 | `/[tenantSlug]/admin/members` | admin | Member list with roles |
 | `/[tenantSlug]/admin/members/invite` | admin | Invite user by email (generates token) |
+| `/[tenantSlug]/admin/integrations` | admin | External integrations: 1Password setup |
+| `/[tenantSlug]/admin/integrations/1password` | admin | 1Password service account token configuration |
 | `/[tenantSlug]/admin/settings` | admin | Tenant name, scrape frequency, categories |
 | `/[tenantSlug]/scrape/[jobId]` | admin | Scrape progress + OTP modal |
 
@@ -214,6 +216,54 @@ const CREDENTIAL_FIELDS: Record<CompanyTypes, Array<{name: string, label: string
 Show each member's display name, email, role badge, and (admin only) action menu:
 - Badge: `מנהל` (green) or `צופה` (gray)
 - Actions: Change role | Remove (disabled if last admin)
+
+### 1Password Integration Setup (`/admin/integrations/1password`)
+
+Two-step form for connecting a 1Password vault:
+
+```
+Step 1 — Service Account Token
+  Label: "אסימון חשבון שירות של 1Password"
+  Input: password field, dir="ltr" (token is Latin chars)
+  Help text: "צור חשבון שירות ב-1Password עם הרשאות קריאה/כתיבה לכספת הרצויה"
+  [בדוק חיבור] button → calls POST /api/tenants/[id]/integrations/1password/test
+    Success: show "✓ Connected — N vaults found" in green
+    Failure: show error in Hebrew ("האסימון לא תקין או שהכספת אינה נגישה")
+
+Step 2 — Vault Selection
+  After successful test, show vault picker populated from 1Password API
+  Label: "בחר כספת"
+  [שמור] → calls POST /api/tenants/[id]/integrations/1password
+
+Status indicator on /admin/integrations:
+  Connected:    badge "מחובר" (green) + last-verified timestamp
+  Not connected: badge "לא מוגדר" (gray) + [הגדר] button
+```
+
+**Security UX rules:**
+- Never display the service account token after saving — show only `••••••••` with a [החלף] (Replace) button
+- Show a warning banner if 1Password is configured but `enabled = false`
+- If 1Password connection fails during a scrape (surfaced via Realtime `scrape_error`), show a specific Hebrew error: "לא ניתן לגשת ל-1Password. בדוק את הגדרות האינטגרציה"
+
+### Add Bank Account — Credential Store Selector
+
+When 1Password integration is configured for the tenant, show a store picker before the credentials form:
+
+```tsx
+{hasOnePassword && (
+  <RadioGroup defaultValue="local" onValueChange={setCredentialStore}>
+    <RadioGroupItem value="local">
+      <span>שמור בצורה מקומית (מוצפן AES-256)</span>
+    </RadioGroupItem>
+    <RadioGroupItem value="1password">
+      <span>שמור ב-1Password</span>
+      <Badge variant="outline" className="ms-2">מומלץ</Badge>
+    </RadioGroupItem>
+  </RadioGroup>
+)}
+```
+
+If `credentialStore === '1password'`, add `credentialStore: '1password'` to the POST body. The backend handles vault item creation transparently.
 
 ### OTP Modal
 Shown when scrape job status becomes `awaiting_otp` via Realtime:

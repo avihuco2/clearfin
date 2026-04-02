@@ -332,6 +332,240 @@ if (existing) return Response.json({ error: 'Scrape already in progress' }, { st
 
 ---
 
+## 1Password Integration
+
+ClearFin supports storing bank credentials in a tenant's 1Password vault as an alternative
+to the built-in AES-256-GCM local store. This uses the **1Password Node.js SDK**
+(`@1password/sdk`) with a **Service Account** token scoped to the tenant's vault.
+
+### How It Works
+
+```
+Admin configures 1Password:
+  1. Creates a 1Password Service Account with read/write access to one vault
+  2. Pastes the service account token into ClearFin admin settings
+  3. ClearFin encrypts the token (AES-256-GCM) and stores it in tenant_integrations
+
+When adding a bank account, admin picks credential store: Local | 1Password
+  - If 1Password: ClearFin creates a Login item in the vault and stores the item UUID
+    in bank_accounts.external_credential_ref
+
+When the scraper worker runs:
+  - Checks bank_accounts.credential_store
+  - If 'local':      decrypts encrypted_credentials with server key (existing flow)
+  - If '1password':  fetches the token from tenant_integrations, decrypts it,
+                     then uses @1password/sdk to read the vault item by UUID
+```
+
+### Integration API Routes (Admin Only)
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/tenants/[id]/integrations` | List configured integrations (token masked) |
+| POST | `/api/tenants/[id]/integrations/1password` | Save / update 1Password service account token |
+| POST | `/api/tenants/[id]/integrations/1password/test` | Verify token works (list vaults) |
+| DELETE | `/api/tenants/[id]/integrations/1password` | Remove integration (sets all accounts back to local) |
+
+### Save Integration Route
+
+```ts
+// app/api/tenants/[id]/integrations/1password/route.ts
+const OnePasswordSchema = z.object({
+  serviceAccountToken: z.string().min(10),
+  vaultId: z.string().min(1),  // 1Password vault UUID to use for this tenant
+})
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const supabase = createRouteHandlerClient({ cookies })
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const forbidden = await requireTenantAdmin(supabase, params.id, user.id)
+  if (forbidden) return forbidden
+
+  const parsed = OnePasswordSchema.safeParse(await req.json())
+  if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 })
+
+  const { serviceAccountToken, vaultId } = parsed.data
+
+  // Encrypt the service account token before storing — treat like a bank credential
+  const { ciphertext, iv, tag } = encrypt(
+    { token: serviceAccountToken },
+    process.env.CREDENTIALS_ENCRYPTION_KEY!
+  )
+
+  await supabase.from('tenant_integrations').upsert({
+    tenant_id: params.id,
+    provider: '1password',
+    encrypted_token: ciphertext,
+    token_iv: iv,
+    token_tag: tag,
+    config: { vaultId },
+    enabled: true,
+    created_by: user.id,
+  }, { onConflict: 'tenant_id,provider' })
+
+  return Response.json({ ok: true })
+}
+```
+
+### Test Integration Route
+
+```ts
+// app/api/tenants/[id]/integrations/1password/test/route.ts
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const supabase = createRouteHandlerClient({ cookies })
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const forbidden = await requireTenantAdmin(supabase, params.id, user.id)
+  if (forbidden) return forbidden
+
+  const token = await resolveOnePasswordToken(supabase, params.id)
+  if (!token) return Response.json({ error: '1Password not configured' }, { status: 404 })
+
+  try {
+    const client = await OnePasswordClient.create({ auth: token })
+    const vaults = await client.vaults.listAll()
+    return Response.json({ ok: true, vaultCount: vaults.length })
+  } catch {
+    return Response.json({ error: 'Token invalid or vault unreachable' }, { status: 400 })
+  }
+}
+```
+
+### Credential Resolver Utility
+
+Add to `apps/web/app/lib/credentials.ts`:
+
+```ts
+import { createClient as OnePasswordClient } from '@1password/sdk'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { decrypt, encrypt } from '@clearfin/crypto'
+
+/** Resolve plaintext credentials for a bank account regardless of store type */
+export async function resolveCredentials(
+  supabase: SupabaseClient,
+  bankAccount: {
+    id: string
+    tenant_id: string
+    credential_store: 'local' | '1password'
+    encrypted_credentials?: string | null
+    credentials_iv?: string | null
+    credentials_tag?: string | null
+    external_credential_ref?: string | null
+  }
+): Promise<Record<string, string>> {
+  if (bankAccount.credential_store === 'local') {
+    // Existing flow — decrypt from DB
+    return decrypt(
+      bankAccount.encrypted_credentials!,
+      bankAccount.credentials_iv!,
+      bankAccount.credentials_tag!,
+      process.env.CREDENTIALS_ENCRYPTION_KEY!
+    )
+  }
+
+  if (bankAccount.credential_store === '1password') {
+    const token = await resolveOnePasswordToken(supabase, bankAccount.tenant_id)
+    if (!token) throw new Error('1Password integration not configured for tenant')
+
+    const { data: integration } = await supabase
+      .from('tenant_integrations')
+      .select('config')
+      .eq('tenant_id', bankAccount.tenant_id)
+      .eq('provider', '1password')
+      .single()
+
+    const client = await OnePasswordClient.create({ auth: token })
+    const item = await client.items.get(
+      (integration!.config as { vaultId: string }).vaultId,
+      bankAccount.external_credential_ref!
+    )
+
+    // Map 1Password item fields back to credentials object
+    return Object.fromEntries(
+      item.fields
+        .filter(f => f.value)
+        .map(f => [f.label?.toLowerCase() ?? f.id, f.value as string])
+    )
+  }
+
+  throw new Error(`Unknown credential_store: ${bankAccount.credential_store}`)
+}
+
+/** Decrypt and return the 1Password service account token for a tenant */
+export async function resolveOnePasswordToken(
+  supabase: SupabaseClient,
+  tenantId: string
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('tenant_integrations')
+    .select('encrypted_token, token_iv, token_tag')
+    .eq('tenant_id', tenantId)
+    .eq('provider', '1password')
+    .eq('enabled', true)
+    .single()
+
+  if (!data) return null
+
+  const decrypted = decrypt(
+    data.encrypted_token,
+    data.token_iv,
+    data.token_tag,
+    process.env.CREDENTIALS_ENCRYPTION_KEY!
+  ) as { token: string }
+
+  return decrypted.token
+}
+```
+
+### Store Credentials in 1Password (when adding a bank account)
+
+Add to the `POST /api/tenants/[id]/accounts` handler when `credentialStore === '1password'`:
+
+```ts
+if (credentialStore === '1password') {
+  const token = await resolveOnePasswordToken(supabase, tenantId)
+  if (!token) return Response.json({ error: '1Password not configured' }, { status: 400 })
+
+  const { data: integration } = await supabase
+    .from('tenant_integrations')
+    .select('config')
+    .eq('tenant_id', tenantId)
+    .eq('provider', '1password')
+    .single()
+
+  const client = await OnePasswordClient.create({ auth: token })
+  const vaultId = (integration!.config as { vaultId: string }).vaultId
+
+  // Create a Login item in 1Password with credential fields
+  const item = await client.items.create({
+    vaultId,
+    category: ItemCategory.Login,
+    title: `ClearFin — ${displayName ?? companyId}`,
+    fields: Object.entries(credentials).map(([label, value]) => ({
+      id: label,
+      label,
+      fieldType: label.toLowerCase().includes('password') ? 'CONCEALED' : 'STRING',
+      value,
+    })),
+  })
+
+  // Store the 1Password item UUID as the reference; no plaintext in DB
+  await supabase.from('bank_accounts').insert({
+    tenant_id: tenantId,
+    added_by: user.id,
+    company_id: companyId,
+    display_name: displayName,
+    credential_store: '1password',
+    external_credential_ref: item.id,
+  })
+} else {
+  // Existing local AES-256-GCM flow
+}
+```
+
 ## BullMQ Job Enqueuing
 
 ```ts

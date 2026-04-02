@@ -52,6 +52,7 @@ CMD ["node", "src/index.js"]
 import { createScraper, CompanyTypes } from 'israeli-bank-scrapers'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt } from '@clearfin/crypto'  // use workspace package — never relative paths across package boundaries
+import { createClient as OnePasswordClient } from '@1password/sdk'
 import type { Job } from 'bullmq'
 
 const supabase = createClient(
@@ -60,31 +61,33 @@ const supabase = createClient(
 )
 
 export interface ScrapeJobData {
-  userId: string
+  tenantId: string
   bankAccountId: string
+  triggeredByUser: string
   triggeredBy: 'manual' | 'schedule'
 }
 
 export async function processScrapeJob(job: Job<ScrapeJobData>) {
-  const { userId, bankAccountId } = job.data
+  const { tenantId, bankAccountId } = job.data
 
-  // 1. Fetch encrypted credentials
+  // 1. Fetch account with credential store metadata
   const { data: account, error } = await supabase
     .from('bank_accounts')
-    .select('company_id, encrypted_credentials, credentials_iv, credentials_tag')
+    .select(`
+      company_id,
+      credential_store,
+      encrypted_credentials, credentials_iv, credentials_tag,
+      external_credential_ref,
+      tenant_id
+    `)
     .eq('id', bankAccountId)
-    .eq('user_id', userId)       // always scope to user even with service role
+    .eq('tenant_id', tenantId)   // always scope to tenant even with service role
     .single()
 
   if (error || !account) throw new Error('Account not found')
 
-  // 2. Decrypt credentials — never log the result
-  const credentials = decrypt(
-    account.encrypted_credentials,
-    account.credentials_iv,
-    account.credentials_tag,
-    process.env.CREDENTIALS_ENCRYPTION_KEY!
-  )
+  // 2. Resolve credentials from the appropriate store — never log the result
+  const credentials = await resolveCredentials(account)
 
   // 3. Update job status
   await supabase.from('scrape_jobs').update({ status: 'running', started_at: new Date().toISOString() })
@@ -171,6 +174,98 @@ export async function processScrapeJob(job: Job<ScrapeJobData>) {
   return { transactionsAdded }
 }
 ```
+
+## Credential Resolver — `src/lib/credentials.ts`
+
+Centralises all credential fetching so the job handler never has `if/else` scattered
+throughout and never directly touches the encryption primitives.
+
+```ts
+import { decrypt } from '@clearfin/crypto'
+import { createClient as OnePasswordClient, ItemCategory } from '@1password/sdk'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+type BankAccountRow = {
+  tenant_id: string
+  credential_store: 'local' | '1password'
+  encrypted_credentials?: string | null
+  credentials_iv?: string | null
+  credentials_tag?: string | null
+  external_credential_ref?: string | null
+}
+
+export async function resolveCredentials(
+  account: BankAccountRow
+): Promise<Record<string, string>> {
+  if (account.credential_store === 'local') {
+    // AES-256-GCM local decrypt
+    return decrypt(
+      account.encrypted_credentials!,
+      account.credentials_iv!,
+      account.credentials_tag!,
+      process.env.CREDENTIALS_ENCRYPTION_KEY!
+    ) as Record<string, string>
+  }
+
+  if (account.credential_store === '1password') {
+    const token = await resolveOnePasswordToken(account.tenant_id)
+    if (!token) throw new Error('1Password integration not configured for tenant')
+
+    const { vaultId } = await resolveOnePasswordConfig(account.tenant_id)
+
+    // @1password/sdk — authenticate with service account token
+    const client = await OnePasswordClient.create({ auth: token })
+    const item = await client.items.get(vaultId, account.external_credential_ref!)
+
+    // Map item fields to credentials object; never log this result
+    return Object.fromEntries(
+      (item.fields ?? [])
+        .filter(f => f.value != null)
+        .map(f => [f.label?.toLowerCase() ?? f.id, f.value as string])
+    )
+  }
+
+  throw new Error(`Unknown credential_store: ${account.credential_store}`)
+}
+
+async function resolveOnePasswordToken(tenantId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('tenant_integrations')
+    .select('encrypted_token, token_iv, token_tag')
+    .eq('tenant_id', tenantId)
+    .eq('provider', '1password')
+    .eq('enabled', true)
+    .single()
+
+  if (!data) return null
+
+  const decrypted = decrypt(
+    data.encrypted_token,
+    data.token_iv,
+    data.token_tag,
+    process.env.CREDENTIALS_ENCRYPTION_KEY!
+  ) as { token: string }
+
+  return decrypted.token
+}
+
+async function resolveOnePasswordConfig(tenantId: string): Promise<{ vaultId: string }> {
+  const { data } = await supabase
+    .from('tenant_integrations')
+    .select('config')
+    .eq('tenant_id', tenantId)
+    .eq('provider', '1password')
+    .single()
+
+  return data!.config as { vaultId: string }
+}
+```
+
+**Security notes for 1Password credential resolution:**
+- The service account token is fetched from the DB and decrypted in memory — never logged or returned to any caller
+- `@1password/sdk` never caches credentials to disk in the worker container
+- If the 1Password service is unreachable (network failure), the job fails with a retryable error — no fallback to plaintext
+- Add `@1password/sdk` to worker `package.json`; it is a server-side dependency only
 
 ## OTP / 2FA Flow (`waitForOtp`)
 
