@@ -1,19 +1,28 @@
 import { Queue } from 'bullmq'
-import { Redis } from '@upstash/redis'
+import IORedis from 'ioredis'
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-})
+// Lazy-initialised — not created at module load time so Next.js build
+// doesn't attempt a Redis connection when env vars are absent.
+let _queue: Queue | null = null
 
-export const scrapeQueue = new Queue('scrape', { connection: redis as never })
+function getQueue(): Queue {
+  if (!_queue) {
+    const connection = new IORedis(process.env.UPSTASH_REDIS_URL!, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      tls: {},
+    })
+    _queue = new Queue('scrape', { connection })
+  }
+  return _queue
+}
 
 export async function enqueueScrapeJob(
   userId: string,
   bankAccountId: string,
   triggeredBy: 'manual' | 'schedule',
 ): Promise<string> {
-  const job = await scrapeQueue.add(
+  const job = await getQueue().add(
     'scrape',
     { userId, bankAccountId, triggeredBy },
     {

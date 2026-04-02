@@ -3,10 +3,13 @@ import { z } from 'zod'
 import { Redis } from '@upstash/redis'
 import { createServerClient } from '@/lib/supabase/server'
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-})
+// Lazy init — avoids connection attempt during Next.js build
+function getRedis() {
+  return new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  })
+}
 
 const OtpSchema = z.object({
   bankAccountId: z.string().uuid(),
@@ -37,7 +40,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Write OTP to Redis — worker polls this key
-  await redis.set(`otp:${bankAccountId}`, otp, { ex: 130 })
+  await getRedis().set(`otp:${bankAccountId}`, otp, { ex: 130 })
 
   return Response.json({ ok: true })
 }
