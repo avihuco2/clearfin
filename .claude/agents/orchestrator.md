@@ -75,17 +75,23 @@ Summarize to the user:
 | Full feature (end-to-end) | `database` → `backend` + `scraper-worker` → `frontend` → `security` |
 | Security review | `security` only |
 | Production deploy prep | `security` (must pass) → deploy |
+| Tenant onboarding flow | `database` → `backend` → `frontend` → `security` |
+| Member management (invite/remove/role) | `backend` → `frontend` |
+| Admin panel (banks/credit cards) | `backend` → `frontend` |
 
 ---
 
 ## Constraints to Enforce Across All Agents
 
 1. **RTL non-negotiable:** Any frontend output must use Tailwind logical properties. Reject `ml-`, `mr-`, `pl-`, `pr-`, `text-left`, `text-right`.
-2. **RLS non-negotiable:** Every new table must have `enable row level security` and a policy using `auth.uid() = user_id`.
+2. **RLS non-negotiable:** Every new table must have `enable row level security` and tenant-scoped policies using `is_tenant_member()` / `is_tenant_admin()` helpers.
 3. **Credential safety:** Bank credentials never appear in logs, API responses, or error messages.
 4. **`service_role` server-only:** Never passes through props, context, or client-side imports.
 5. **TypeScript strict:** All new code must be TypeScript with no `any` unless explicitly justified.
 6. **Node 22:** Worker Dockerfile must use `node:22` or higher.
+7. **Tenant isolation:** Every API route that touches tenant data must call `checkTenantRole()` before acting — never rely on RLS alone at the API layer.
+8. **Role enforcement in UI:** Admin-only UI elements must use `<AdminOnly>` wrapper — never just `disabled`. Viewers must not see admin routes at all.
+9. **Last-admin guard:** Any route that removes or demotes a member must verify at least one other admin exists before proceeding.
 
 ---
 

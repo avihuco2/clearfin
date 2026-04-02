@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Edit(/home/user/clearfin/**)",
       "Write(/home/user/clearfin/**)"

@@ -54,6 +54,18 @@ new Intl.DateTimeFormat('he-IL', { dateStyle: 'medium' }).format(date)
 new Intl.RelativeTimeFormat('he', { numeric: 'auto' }).format(-3, 'day') // "לפני 3 ימים"
 ```
 
+---
+
+## Multi-Tenant UI Model
+
+The app is tenant-scoped. After login, users choose (or are redirected to) their active tenant. All data pages operate within the active tenant context.
+
+- **Admin** users see the full Admin Panel: bank accounts, credit cards, member management, scrape triggers
+- **Viewer** users see only: dashboard, transactions, categories (read) — admin actions are hidden, not just disabled
+- The active `tenantId` is stored in a context provider and passed to all API calls
+
+---
+
 ## Component Patterns
 
 ### Protected Route Layout
@@ -72,6 +84,45 @@ export default async function DashboardLayout({ children }) {
 }
 ```
 
+### Tenant Context Provider
+```tsx
+// app/(dashboard)/[tenantSlug]/layout.tsx
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+
+export default async function TenantLayout({ children, params }) {
+  const supabase = createServerComponentClient({ cookies })
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const { data: membership } = await supabase
+    .from('tenant_memberships')
+    .select('role, tenants(id, name, slug)')
+    .eq('tenants.slug', params.tenantSlug)
+    .eq('user_id', user!.id)
+    .single()
+
+  if (!membership) redirect('/dashboard')  // not a member of this tenant
+
+  return (
+    <TenantProvider tenant={membership.tenants} role={membership.role}>
+      {children}
+    </TenantProvider>
+  )
+}
+```
+
+### Role Guard Component
+```tsx
+// components/RoleGuard.tsx
+'use client'
+import { useTenant } from '@/contexts/TenantContext'
+
+export function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { role } = useTenant()
+  if (role !== 'admin') return null
+  return <>{children}</>
+}
+```
+
 ### Realtime Transaction Updates
 ```tsx
 'use client'
@@ -80,14 +131,14 @@ useEffect(() => {
     .channel('transactions')
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'transactions',
-      filter: `user_id=eq.${userId}`
+      filter: `tenant_id=eq.${tenantId}`
     }, (payload) => {
       // Treat payload as untrusted — validate before rendering
       setTransactions(prev => [validateTransaction(payload.new), ...prev])
     })
     .subscribe()
   return () => { supabase.removeChannel(channel) }
-}, [])
+}, [tenantId])
 ```
 
 ### Recharts RTL Config
@@ -98,25 +149,94 @@ useEffect(() => {
 </BarChart>
 ```
 
+---
+
 ## Pages to Build (by phase)
 
-| Phase | Route | Description |
+### Phase 1 — Auth & Tenant Selection
+
+| Route | Access | Description |
 |---|---|---|
-| 1 | `/login` | Google OAuth sign-in, Hebrew copy |
-| 1 | `/(dashboard)` | Protected layout with nav sidebar |
-| 1 | `/(dashboard)/page.tsx` | Empty dashboard with welcome message |
-| 2 | `/(dashboard)/accounts` | Bank account list + "Add Account" button |
-| 2 | `/(dashboard)/accounts/new` | Add bank account form (credential input) |
-| 2 | `/(dashboard)/scrape/[jobId]` | Scrape progress + OTP modal |
-| 3 | `/(dashboard)/transactions` | Filterable transaction table |
-| 3 | `/(dashboard)/dashboard` | Charts: monthly spend, category donut |
-| 4 | `/(dashboard)/settings` | Scrape frequency, profile, categories |
+| `/login` | public | Google OAuth sign-in, Hebrew copy |
+| `/onboarding` | authed, no tenant | Create first tenant — shown after first-ever login |
+| `/dashboard` | authed | Tenant selector: list tenants user belongs to |
+
+### Phase 2 — Tenant Dashboard (Viewer + Admin)
+
+| Route | Access | Description |
+|---|---|---|
+| `/[tenantSlug]` | member | Tenant home: balance summary, recent transactions |
+| `/[tenantSlug]/transactions` | member | Filterable transaction table |
+| `/[tenantSlug]/dashboard` | member | Charts: monthly spend, category donut, account balances |
+
+### Phase 3 — Admin Panel (Admin Only)
+
+| Route | Access | Description |
+|---|---|---|
+| `/[tenantSlug]/admin` | admin | Admin overview: accounts, jobs, member count |
+| `/[tenantSlug]/admin/accounts` | admin | Bank & credit card accounts list |
+| `/[tenantSlug]/admin/accounts/new` | admin | Add bank/credit card — select institution, enter credentials |
+| `/[tenantSlug]/admin/accounts/[id]` | admin | Account detail: scrape history, re-authenticate |
+| `/[tenantSlug]/admin/members` | admin | Member list with roles |
+| `/[tenantSlug]/admin/members/invite` | admin | Invite user by email (generates token) |
+| `/[tenantSlug]/admin/settings` | admin | Tenant name, scrape frequency, categories |
+| `/[tenantSlug]/scrape/[jobId]` | admin | Scrape progress + OTP modal |
+
+### Phase 4 — Invitation Accept Flow (Public)
+
+| Route | Access | Description |
+|---|---|---|
+| `/invite/[token]` | public | Show invitation details; prompt login if needed, then accept |
+
+---
+
+## Key UI Patterns
+
+### Onboarding Wizard (`/onboarding`)
+After first Google login, redirect here if user has no tenant memberships.
+```
+Step 1: "ברוך הבא! איך נקרא לבית שלך?" → tenant name + auto-suggest slug
+Step 2: Success → redirect to /[tenantSlug]/admin/accounts/new
+```
+
+### Add Bank Account Form
+Credential fields vary by `companyId` — render dynamically based on selected institution:
+```ts
+const CREDENTIAL_FIELDS: Record<CompanyTypes, Array<{name: string, label: string, type: string}>> = {
+  leumi:   [{ name: 'username', label: 'מספר משתמש', type: 'text' }, { name: 'password', label: 'סיסמה', type: 'password' }],
+  hapoalim:[{ name: 'userCode', label: 'קוד משתמש', type: 'text' }, { name: 'password', label: 'סיסמה', type: 'password' }],
+  amex:    [{ name: 'id', label: 'תעודת זהות', type: 'text' }, { name: 'card6Digits', label: '6 ספרות כרטיס', type: 'text' }, { name: 'password', label: 'סיסמה', type: 'password' }],
+  // ...
+}
+```
+
+### Member Management Table
+Show each member's display name, email, role badge, and (admin only) action menu:
+- Badge: `מנהל` (green) or `צופה` (gray)
+- Actions: Change role | Remove (disabled if last admin)
+
+### OTP Modal
+Shown when scrape job status becomes `awaiting_otp` via Realtime:
+```tsx
+<Dialog open={awaitingOtp}>
+  <DialogContent>
+    <DialogTitle>אימות דו-שלבי</DialogTitle>
+    <p>הכנס את הקוד שקיבלת ב-SMS עבור {accountName}</p>
+    <InputOTP maxLength={6} dir="ltr" />  {/* OTP digits are LTR */}
+    <Button onClick={submitOtp}>אשר</Button>
+  </DialogContent>
+</Dialog>
+```
+
+---
 
 ## Output Requirements
 
 - Every user-facing string in Hebrew
+- Role-restricted UI uses `<AdminOnly>` wrapper — never just `disabled` prop
 - All amounts formatted with `Intl.NumberFormat('he-IL', { currency: 'ILS' })`
 - All dates formatted with `Intl.DateTimeFormat('he-IL')`
 - Loading states use shadcn/ui `Skeleton` component
 - Errors displayed in Hebrew with `sonner` toast or inline alert
 - No `console.log` in production components
+- Invitation and OTP token values never rendered visibly in the DOM beyond their intended UI
