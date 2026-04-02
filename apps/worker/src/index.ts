@@ -1,4 +1,5 @@
 import { Worker } from 'bullmq'
+import cron from 'node-cron'
 import { bullConnection } from './lib/redis.js'
 import { processScrapeJob } from './jobs/scrape.js'
 import type { ScrapeJobData, ScrapeJobResult } from './jobs/scrape.js'
@@ -39,6 +40,38 @@ worker.on('error', (err) => {
 console.log(
   `[worker] started queue=${QUEUE_NAME} concurrency=${concurrency}`,
 )
+
+// ---------------------------------------------------------------------------
+// Scheduled scraping — every 6 hours, calls the web app's cron endpoint.
+// Runs inside Railway so Vercel Hobby plan cron restrictions don't apply.
+// ---------------------------------------------------------------------------
+
+const WEB_URL = process.env['WEB_URL']
+const CRON_SECRET = process.env['CRON_SECRET']
+
+if (WEB_URL && CRON_SECRET) {
+  cron.schedule('0 */6 * * *', async () => {
+    console.log('[cron] triggering scheduled scrape')
+    try {
+      const res = await fetch(`${WEB_URL}/api/cron/scrape`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${CRON_SECRET}` },
+      })
+      if (res.ok) {
+        const body = await res.json() as { enqueued?: number }
+        console.log(`[cron] enqueued ${body.enqueued ?? 0} scrape jobs`)
+      } else {
+        console.error(`[cron] cron endpoint returned ${res.status}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`[cron] fetch failed: ${message}`)
+    }
+  })
+  console.log('[cron] scheduled scrape every 6 hours')
+} else {
+  console.warn('[cron] WEB_URL or CRON_SECRET not set — scheduled scraping disabled')
+}
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown on SIGTERM (Railway sends this before container stop)
