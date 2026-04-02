@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { Suspense } from 'react'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { TransactionFilters } from '@/components/transaction-filters'
+import { CategorySelect } from '@/components/category-select'
+import { CategorizeButton } from '@/components/categorize-button'
+import type { CategoryOption } from '@/components/category-select'
 
 const PAGE_SIZE = 50
 
@@ -32,9 +35,10 @@ interface BankAccount {
   display_name: string | null
 }
 
-interface Category {
+interface CategoryRaw {
   id: string
-  name: string
+  name_he: string | null
+  name: string | null
 }
 
 export default async function TransactionsPage({
@@ -47,8 +51,8 @@ export default async function TransactionsPage({
 
   const offset = Math.max(0, parseInt(sp.offset ?? '0', 10) || 0)
 
-  // Fetch accounts and categories for filter controls
-  const [accountsResult, categoriesResult] = await Promise.all([
+  // Fetch accounts and categories for filter controls + inline select
+  const [accountsResult, categoriesResult, uncatResult] = await Promise.all([
     supabase
       .from('bank_accounts')
       .select('id, company_id, display_name')
@@ -56,9 +60,13 @@ export default async function TransactionsPage({
       .returns<BankAccount[]>(),
     supabase
       .from('categories')
-      .select('id, name')
-      .order('name', { ascending: true })
-      .returns<Category[]>(),
+      .select('id, name_he, name')
+      .order('name_he', { ascending: true })
+      .returns<CategoryRaw[]>(),
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .is('category_id', null),
   ])
 
   // Build transactions query with filters
@@ -79,11 +87,24 @@ export default async function TransactionsPage({
   const { data: transactions, count, error } = await query.returns<Transaction[]>()
 
   const accounts = accountsResult.data ?? []
-  const categories = categoriesResult.data ?? []
+  const categoriesRaw = categoriesResult.data ?? []
+  const uncategorizedCount = uncatResult.count ?? 0
+
+  // Normalise categories — prefer name_he, fall back to name
+  const categories: CategoryOption[] = categoriesRaw.map((c) => ({
+    id: c.id,
+    name_he: c.name_he ?? c.name ?? c.id,
+  }))
 
   // Build lookup maps
   const accountMap = new Map<string, BankAccount>(accounts.map((a) => [a.id, a]))
-  const categoryMap = new Map<string, Category>(categories.map((c) => [c.id, c]))
+  const categoryMap = new Map<string, CategoryOption>(categories.map((c) => [c.id, c]))
+
+  // Filter-bar-compatible categories (id + name)
+  const filterCategories = categoriesRaw.map((c) => ({
+    id: c.id,
+    name: c.name_he ?? c.name ?? c.id,
+  }))
 
   const totalCount = count ?? 0
   const hasNext = offset + PAGE_SIZE < totalCount
@@ -102,18 +123,21 @@ export default async function TransactionsPage({
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-foreground)]">עסקאות</h1>
-        <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-          {totalCount > 0
-            ? `${totalCount.toLocaleString('he-IL')} עסקאות`
-            : 'לא נמצאו עסקאות'}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-foreground)]">עסקאות</h1>
+          <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+            {totalCount > 0
+              ? `${totalCount.toLocaleString('he-IL')} עסקאות`
+              : 'לא נמצאו עסקאות'}
+          </p>
+        </div>
+        <CategorizeButton uncategorizedCount={uncategorizedCount} />
       </div>
 
       {/* Filter controls — client component wrapped in Suspense for streaming */}
       <Suspense fallback={<div className="h-24 animate-pulse rounded-xl bg-gray-100" />}>
-        <TransactionFilters accounts={accounts} categories={categories} />
+        <TransactionFilters accounts={accounts} categories={filterCategories} />
       </Suspense>
 
       {/* Error state */}
@@ -150,7 +174,7 @@ export default async function TransactionsPage({
       {transactions && transactions.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px] text-sm" aria-label="טבלת עסקאות">
+            <table className="w-full min-w-[640px] text-sm" aria-label="טבלת עסקאות">
               <thead>
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-muted)]">
                   <th
@@ -188,7 +212,6 @@ export default async function TransactionsPage({
               <tbody className="divide-y divide-[var(--color-border)]">
                 {transactions.map((tx) => {
                   const account = accountMap.get(tx.bank_account_id)
-                  const category = tx.category_id ? categoryMap.get(tx.category_id) : null
                   const isDebit = tx.charged_amount < 0
 
                   return (
@@ -211,15 +234,11 @@ export default async function TransactionsPage({
                         {formatCurrency(tx.charged_amount)}
                       </td>
                       <td className="px-4 py-3.5">
-                        {category ? (
-                          <span className="inline-flex items-center rounded-full bg-[var(--color-accent)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent-foreground)]">
-                            {category.name}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-[var(--color-muted-foreground)]">
-                            ללא קטגוריה
-                          </span>
-                        )}
+                        <CategorySelect
+                          transactionId={tx.id}
+                          currentCategoryId={tx.category_id}
+                          categories={categories}
+                        />
                       </td>
                       <td className="px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
                         {account?.display_name ?? account?.company_id ?? '—'}

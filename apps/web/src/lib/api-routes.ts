@@ -2,9 +2,10 @@
  *  Import this in client code instead of hardcoding strings. */
 export const API_ROUTES = {
   accounts: {
-    list:   '/api/accounts' as const,
-    create: '/api/accounts' as const,
-    delete: (id: string) => `/api/accounts/${id}` as const,
+    list:         '/api/accounts' as const,
+    create:       '/api/accounts' as const,
+    delete:       (id: string) => `/api/accounts/${id}` as const,
+    scrapeAccount:(accountId: string) => `/api/accounts/${accountId}/scrape` as const,
   },
   scrape: {
     trigger: '/api/scrape/trigger' as const,
@@ -21,5 +22,8 @@ export const API_ROUTES = {
   },
   categorize: {
     trigger: '/api/categorize' as const,
+  },
+  dashboard: {
+    summary: '/api/dashboard/summary' as const,
   },
 } as const
