@@ -97,10 +97,17 @@ Owns the Railway Docker container, BullMQ consumer, `israeli-bank-scrapers` inte
 | Skill | Purpose in ClearFin |
 |---|---|
 | `schedule` | Cron every 6h — enqueue scrape jobs for all active bank accounts |
-| `claude-api` | Batch-categorize transactions with Claude 3 Haiku post-scrape |
+| `claude-api` | Batch-categorize transactions with Claude Haiku post-scrape |
 | `loop` | Poll for OTP submission during 2FA bank login (5s interval, 120s timeout) |
 | `session-start-hook` | On new Google login: create `profiles` row + seed Hebrew categories |
 | `update-config` | Let users change scrape frequency from Settings UI without redeployment |
+
+### Downloaded Skills (`.claude/skills/`)
+
+| Skill | Source | Purpose in ClearFin |
+|---|---|---|
+| `webapp-testing` | `anthropics/skills` | Playwright tests for the Next.js frontend and API routes |
+| `xlsx` | `anthropics/skills` | Export transactions to `.xlsx` for offline analysis and tax filing |
 
 ### Custom Slash Commands
 
@@ -108,6 +115,7 @@ Owns the Railway Docker container, BullMQ consumer, `israeli-bank-scrapers` inte
 |---|---|---|
 | `/orchestrate` | `.claude/commands/orchestrate.md` | Coordinate multi-agent tasks end-to-end |
 | `/security-scan` | `.claude/commands/security-scan.md` | Full vulnerability audit |
+| `/api` | `.claude/commands/api.md` | Scaffold/audit Next.js Route Handlers; integrates `claude-api` skill |
 | `/categorize` | `.claude/commands/categorize.md` | Trigger AI categorization for uncategorized txns |
 | `/scrape` | `.claude/commands/scrape.md` | Trigger manual bank scrape for an account |
 | `/migrate` | `.claude/commands/migrate.md` | Apply pending Supabase migrations |

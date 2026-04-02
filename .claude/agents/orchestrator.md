@@ -64,17 +64,19 @@ Summarize to the user:
 
 ## Task Routing Cheat Sheet
 
-| User Request Type | Agents to Invoke |
+| User Request Type | Agents / Skills to Invoke |
 |---|---|
 | New UI page or component | `frontend` |
-| New API endpoint | `backend` → `frontend` |
+| New API endpoint | `/api` skill (scaffold) → `backend` agent (logic) → `frontend` |
 | DB schema change | `database` → `backend` → `frontend` |
 | New scraper/bank support | `database` + `scraper-worker` → `backend` → `frontend` |
 | Auth or credential change | `database` + `backend` → `security` |
+| AI categorisation work | `/api` skill (scaffold `/api/categorize`) → `claude-api` skill → `backend` agent |
 | Performance issue | `database` (indexes) + `frontend` (suspense/lazy) |
-| Full feature (end-to-end) | `database` → `backend` + `scraper-worker` → `frontend` → `security` |
+| Full feature (end-to-end) | `database` → `/api` skill + `scraper-worker` → `frontend` → `security` |
+| Audit all Route Handlers | `/api audit` |
 | Security review | `security` only |
-| Production deploy prep | `security` (must pass) → deploy |
+| Production deploy prep | `/api audit` + `security` (must pass) → deploy |
 
 ---
 
