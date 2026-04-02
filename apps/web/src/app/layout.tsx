@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { Heebo } from 'next/font/google'
-import { DirectionProvider } from '@radix-ui/react-direction'
+import { Providers } from '@/components/providers'
 import './globals.css'
 
 const heebo = Heebo({ subsets: ['hebrew', 'latin'] })
@@ -14,9 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="he" dir="rtl" className={heebo.className}>
       <body>
-        <DirectionProvider dir="rtl">
-          {children}
-        </DirectionProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )
