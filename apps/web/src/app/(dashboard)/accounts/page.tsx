@@ -1,0 +1,207 @@
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
+import { formatDate } from '@/lib/format'
+import { ScrapeButton } from '@/components/scrape-button'
+
+type ScrapeStatus = 'idle' | 'running' | 'done' | 'error' | 'awaiting_otp'
+
+interface BankAccount {
+  id: string
+  company_id: string
+  display_name: string | null
+  last_scraped_at: string | null
+  scrape_status: ScrapeStatus | null
+  balance: number | null
+}
+
+const COMPANY_LABELS: Record<string, string> = {
+  hapoalim: 'בנק הפועלים',
+  leumi: 'בנק לאומי',
+  discount: 'בנק דיסקונט',
+  mizrahi: 'בנק מזרחי טפחות',
+  visaCal: 'ויזה כ.א.ל',
+  max: 'מקס (לאומי קארד)',
+  isracard: 'ישראכארד',
+  amex: 'אמריקן אקספרס',
+}
+
+const STATUS_CONFIG: Record<
+  ScrapeStatus,
+  { label: string; className: string }
+> = {
+  idle: {
+    label: 'ממתין',
+    className: 'bg-gray-100 text-gray-700',
+  },
+  running: {
+    label: 'מריץ',
+    className: 'bg-blue-100 text-blue-700',
+  },
+  done: {
+    label: 'הושלם',
+    className: 'bg-green-100 text-green-700',
+  },
+  error: {
+    label: 'שגיאה',
+    className: 'bg-red-100 text-red-700',
+  },
+  awaiting_otp: {
+    label: 'ממתין לקוד',
+    className: 'bg-yellow-100 text-yellow-700',
+  },
+}
+
+export default async function AccountsPage() {
+  const supabase = createServerComponentClient({ cookies })
+
+  const { data: accounts, error } = await supabase
+    .from('bank_accounts')
+    .select(
+      'id, company_id, display_name, last_scraped_at, scrape_status, balance',
+    )
+    .order('created_at', { ascending: false })
+    .returns<BankAccount[]>()
+
+  const hasAccounts = !error && accounts && accounts.length > 0
+
+  return (
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-foreground)]">חשבונות</h1>
+          <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+            נהל את חשבונות הבנק המחוברים שלך
+          </p>
+        </div>
+        <Link
+          href="/accounts/new"
+          className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+          הוסף חשבון
+        </Link>
+      </div>
+
+      {/* Error state */}
+      {error && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          שגיאה בטעינת החשבונות. נסה לרענן את הדף.
+        </div>
+      )}
+
+      {/* Account list */}
+      {hasAccounts ? (
+        <ul className="space-y-3" role="list" aria-label="רשימת חשבונות">
+          {accounts.map((account) => (
+            <AccountCard key={account.id} account={account} />
+          ))}
+        </ul>
+      ) : (
+        !error && (
+          /* Empty state */
+          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
+            <div className="mb-4 rounded-full bg-[var(--color-accent)] p-4 text-[var(--color-primary)]">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect width="20" height="14" x="2" y="5" rx="2" />
+                <line x1="2" x2="22" y1="10" y2="10" />
+              </svg>
+            </div>
+            <h2 className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">
+              אין חשבונות מחוברים
+            </h2>
+            <p className="mb-6 max-w-xs text-sm text-[var(--color-muted-foreground)]">
+              חבר חשבון בנק או כרטיס אשראי כדי להתחיל לסנכרן עסקאות
+            </p>
+            <Link
+              href="/accounts/new"
+              className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              חבר חשבון בנק
+            </Link>
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
+function AccountCard({ account }: { account: BankAccount }) {
+  const status = account.scrape_status ?? 'idle'
+  const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.idle
+  const companyLabel = COMPANY_LABELS[account.company_id] ?? account.company_id
+
+  return (
+    <li className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        {/* Account info */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-[var(--color-foreground)]">
+              {account.display_name ?? companyLabel}
+            </h3>
+            <span
+              className={[
+                'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
+                statusCfg.className,
+              ].join(' ')}
+            >
+              {statusCfg.label}
+            </span>
+          </div>
+          <p className="mt-0.5 text-sm text-[var(--color-muted-foreground)]">{companyLabel}</p>
+          {account.last_scraped_at && (
+            <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+              עדכון אחרון: {formatDate(account.last_scraped_at)}
+            </p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-2">
+          <ScrapeButton accountId={account.id} status={status} />
+        </div>
+      </div>
+    </li>
+  )
+}
+
