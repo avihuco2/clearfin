@@ -11,13 +11,13 @@ const UpdateSchema = z.object({
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const supabase = createServerClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const paramsParsed = ParamsSchema.safeParse(params)
+  const paramsParsed = ParamsSchema.safeParse(await params)
   if (!paramsParsed.success) return Response.json({ error: 'Invalid transaction id' }, { status: 400 })
 
   const body = await req.json()

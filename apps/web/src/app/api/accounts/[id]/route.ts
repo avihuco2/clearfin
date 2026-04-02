@@ -6,13 +6,13 @@ const ParamsSchema = z.object({ id: z.string().uuid() })
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const supabase = createServerClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const parsed = ParamsSchema.safeParse(params)
+  const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid account id' }, { status: 400 })
 
   const { id } = parsed.data

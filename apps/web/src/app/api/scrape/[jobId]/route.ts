@@ -6,13 +6,13 @@ const ParamsSchema = z.object({ jobId: z.string().uuid() })
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { jobId: string } },
+  { params }: { params: Promise<{ jobId: string }> },
 ) {
   const supabase = createServerClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const parsed = ParamsSchema.safeParse(params)
+  const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid job id' }, { status: 400 })
 
   const { data: job } = await supabase
