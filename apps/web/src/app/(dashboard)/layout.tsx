@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { SidebarNav } from '@/components/sidebar-nav'
 import { MobileSidebar } from '@/components/mobile-sidebar'
+import { RealtimeTransactions } from '@/components/realtime-transactions'
 
 export default async function DashboardLayout({
   children,
@@ -32,6 +33,9 @@ export default async function DashboardLayout({
 
       {/* Mobile sidebar (drawer) */}
       <MobileSidebar displayName={displayName} />
+
+      {/* Realtime transaction arrival banner */}
+      <RealtimeTransactions userId={session.user.id} />
 
       {/* Main content — offset by sidebar width on desktop */}
       <main

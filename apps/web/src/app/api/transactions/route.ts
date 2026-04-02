@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from('transactions')
     .select('id, date, description, charged_amount, charged_currency, type, status, category_id, notes, bank_account_id')
+    .eq('user_id', user.id)  // defence in depth — explicit ownership filter beyond RLS
     .order('date', { ascending: false })
     .range(offset, offset + limit - 1)
 
