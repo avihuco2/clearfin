@@ -33,6 +33,18 @@ interface BankAccount {
   id: string
   company_id: string
   display_name: string | null
+  account_number: string | null
+}
+
+const COMPANY_LABELS: Record<string, string> = {
+  hapoalim: 'בנק הפועלים',
+  leumi: 'בנק לאומי',
+  discount: 'בנק דיסקונט',
+  mizrahi: 'בנק מזרחי',
+  visaCal: 'ויזה כ.א.ל',
+  max: 'מקס',
+  isracard: 'ישראכארד',
+  amex: 'אמריקן אקספרס',
 }
 
 interface CategoryRaw {
@@ -55,7 +67,7 @@ export default async function TransactionsPage({
   const [accountsResult, categoriesResult, uncatResult] = await Promise.all([
     supabase
       .from('bank_accounts')
-      .select('id, company_id, display_name')
+      .select('id, company_id, display_name, account_number')
       .order('created_at', { ascending: false })
       .returns<BankAccount[]>(),
     supabase
@@ -240,8 +252,11 @@ export default async function TransactionsPage({
                           categories={categories}
                         />
                       </td>
-                      <td className="px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
-                        {account?.display_name ?? account?.company_id ?? '—'}
+                      <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
+                        {account
+                          ? (account.display_name ?? COMPANY_LABELS[account.company_id] ?? account.company_id)
+                            + (account.account_number ? ` ****${account.account_number.slice(-4)}` : '')
+                          : '—'}
                       </td>
                     </tr>
                   )
