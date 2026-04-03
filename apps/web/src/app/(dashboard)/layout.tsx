@@ -2,22 +2,13 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { SidebarNav } from '@/components/sidebar-nav'
-import { MobileSidebar } from '@/components/mobile-sidebar'
+import { BottomNav } from '@/components/bottom-nav'
 import { RealtimeTransactions } from '@/components/realtime-transactions'
 
-export default async function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = createServerComponentClient({ cookies })
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  if (!session) {
-    redirect('/login')
-  }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/login')
 
   const displayName =
     session.user.user_metadata?.['full_name'] ??
@@ -25,24 +16,28 @@ export default async function DashboardLayout({
     'משתמש'
 
   return (
-    <div className="flex min-h-dvh bg-[var(--color-background)]">
+    <div className="flex min-h-dvh">
+
       {/* Desktop sidebar — fixed on the end (right) side in RTL */}
-      <aside className="fixed inset-y-0 end-0 hidden w-64 bg-[var(--color-sidebar)] md:block">
+      <aside
+        className="fixed inset-y-0 end-0 hidden w-60 md:flex md:flex-col"
+        style={{
+          background: 'var(--color-sidebar)',
+          borderInlineStart: '1px solid var(--color-border)',
+        }}
+      >
         <SidebarNav displayName={displayName} />
       </aside>
 
-      {/* Mobile sidebar (drawer) */}
-      <MobileSidebar displayName={displayName} />
+      {/* Mobile bottom tab nav */}
+      <BottomNav />
 
-      {/* Realtime transaction arrival banner */}
+      {/* Realtime banner */}
       <RealtimeTransactions userId={session.user.id} />
 
-      {/* Main content — offset by sidebar width on desktop */}
-      <main
-        className="flex-1 overflow-auto md:me-64"
-        id="main-content"
-      >
-        <div className="mx-auto max-w-5xl p-6 pt-16 md:pt-6">
+      {/* Main content */}
+      <main className="flex-1 overflow-auto md:me-60" id="main-content">
+        <div className="mx-auto max-w-4xl px-4 py-6 pb-24 md:px-8 md:pb-8">
           {children}
         </div>
       </main>
