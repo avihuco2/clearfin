@@ -2,5 +2,5 @@
   "buildCommand": "npm run build --workspace=apps/web",
   "outputDirectory": "apps/web/.next",
   "framework": "nextjs",
-  "installCommand": "npm install"
+  "installCommand": "npm install --workspace=apps/web --workspace=packages/crypto --workspace=packages/db --include-workspace-root"
 }
