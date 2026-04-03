@@ -20,8 +20,9 @@ export const redis = new UpstashRedis({
  * Connects to Upstash via the `rediss://` URL (TLS, ioredis protocol).
  * Set UPSTASH_REDIS_URL to:  rediss://default:<token>@<host>:<port>
  */
-export const bullConnection = new IORedis(process.env['UPSTASH_REDIS_URL'], {
-  maxRetriesPerRequest: null, // required by BullMQ
-  enableReadyCheck: false,    // required by BullMQ
-  tls: {},                    // Upstash requires TLS
+const _redisUrl = process.env['UPSTASH_REDIS_URL']!
+export const bullConnection = new IORedis(_redisUrl, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  ...(_redisUrl.startsWith('rediss://') ? { tls: {} } : {}),
 })

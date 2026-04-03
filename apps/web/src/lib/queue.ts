@@ -7,10 +7,12 @@ let _queue: Queue | null = null
 
 function getQueue(): Queue {
   if (!_queue) {
-    const connection = new IORedis(process.env.UPSTASH_REDIS_URL!, {
+    const url = process.env.UPSTASH_REDIS_URL!
+    const useTls = url.startsWith('rediss://')
+    const connection = new IORedis(url, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
-      tls: {},
+      ...(useTls ? { tls: {} } : {}),
     })
     _queue = new Queue('scrape', { connection })
   }
