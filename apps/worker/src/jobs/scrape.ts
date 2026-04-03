@@ -69,6 +69,27 @@ async function waitForOtp(bankAccountId: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Start-date logic
+//
+// • No prior scrape → go back 6 months (initial history load)
+// • Has prior scrape → go back to last_scraped_at OR 30 days ago,
+//   whichever is more recent (avoids re-fetching too much history)
+// ---------------------------------------------------------------------------
+
+function resolveStartDate(lastScrapedAt: string | null): Date {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+
+  if (!lastScrapedAt) {
+    // First scrape — fetch 6 months of history
+    return new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
+  }
+
+  const lastSync = new Date(lastScrapedAt)
+  // Use the more recent of: last sync date vs 30 days ago
+  return lastSync > thirtyDaysAgo ? lastSync : thirtyDaysAgo
+}
+
+// ---------------------------------------------------------------------------
 // Main job handler
 // ---------------------------------------------------------------------------
 
@@ -140,11 +161,7 @@ export async function processScrapeJob(
   // ------------------------------------------------------------------
   const scraper = createScraper({
     companyId: account.company_id as CompanyTypes,
-    // First scrape (no prior history): go back 1 year.
-    // Subsequent scrapes: go back 60 days to catch late-posted transactions.
-    startDate: new Date(Date.now() - (triggeredBy === 'manual' && !account.last_scraped_at
-      ? 365
-      : 60) * 24 * 60 * 60 * 1000),
+    startDate: resolveStartDate(account.last_scraped_at as string | null),
     showBrowser: false,
     verbose: false,
   })
