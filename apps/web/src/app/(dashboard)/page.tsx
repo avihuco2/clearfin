@@ -152,10 +152,7 @@ function StatCard({ label, value, sub, color, href }: {
 }) {
   const c = colorMap[color]
   const inner = (
-    <div
-      className="glass-card p-4"
-      style={{ borderColor: c.border }}
-    >
+    <div className="glass-card p-4" style={{ borderColor: c.border }}>
       <p className="mb-3 text-xs font-medium text-[var(--color-foreground-muted)]">{label}</p>
       <p className="animate-num-in text-xl font-bold leading-none" style={{ color: c.text }}>{value}</p>
       <p className="mt-1.5 text-[11px] text-[var(--color-foreground-dim)]">{sub}</p>
@@ -174,8 +171,6 @@ function QuickAction({ href, icon, label, desc }: {
     <Link
       href={href}
       className="glass-card flex items-center gap-4 p-4"
-      onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(6,182,212,0.25)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.1)' }}
     >
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
