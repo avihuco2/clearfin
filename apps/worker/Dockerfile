@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/crypto/package.json ./packages/crypto/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
+COPY apps/worker/patches ./apps/worker/patches
 
 RUN npm install --workspace=apps/worker
 
