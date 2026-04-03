@@ -71,21 +71,22 @@ async function waitForOtp(bankAccountId: string): Promise<string> {
 // ---------------------------------------------------------------------------
 // Start-date logic
 //
-// • No prior scrape → go back 6 months (initial history load)
-// • Has prior scrape → go back to last_scraped_at OR 30 days ago,
-//   whichever is more recent (avoids re-fetching too much history)
+// • No existing transactions for this account → always go back 3 months
+//   (catches cases where last_scraped_at was set but nothing was saved)
+// • Has existing transactions → use last_scraped_at minus 1 day overlap,
+//   floored at 3 months ago
 // ---------------------------------------------------------------------------
 
-function resolveStartDate(lastScrapedAt: string | null): Date {
+function resolveStartDate(lastScrapedAt: string | null, hasTransactions: boolean): Date {
   const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
 
-  if (!lastScrapedAt) {
-    // First scrape — fetch 3 months of history
+  if (!lastScrapedAt || !hasTransactions) {
+    // No prior data — fetch full 3-month history
     return threeMonthsAgo
   }
 
-  const lastSync = new Date(lastScrapedAt)
-  // Use the more recent of: last sync date vs 3 months ago
+  // 1-day overlap avoids gaps caused by timezone or late-posting transactions
+  const lastSync = new Date(new Date(lastScrapedAt).getTime() - 24 * 60 * 60 * 1000)
   return lastSync > threeMonthsAgo ? lastSync : threeMonthsAgo
 }
 
@@ -159,9 +160,23 @@ export async function processScrapeJob(
   // ------------------------------------------------------------------
   // 4. Create and run scraper
   // ------------------------------------------------------------------
+
+  // Check whether this account has any saved transactions yet.
+  // If not, we always do a full 3-month backfill even if last_scraped_at is set
+  // (last_scraped_at can be set from a scrape that succeeded technically but
+  //  saved 0 rows, e.g. due to a now-fixed schema constraint).
+  const { count: txnCount } = await supabase
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('bank_account_id', bankAccountId)
+
+  const hasTransactions = (txnCount ?? 0) > 0
+  const startDate = resolveStartDate(account.last_scraped_at as string | null, hasTransactions)
+  console.log(`[scrape] job=${job.id} startDate=${startDate.toISOString().slice(0,10)} hasTransactions=${hasTransactions}`)
+
   const scraper = createScraper({
     companyId: account.company_id as CompanyTypes,
-    startDate: resolveStartDate(account.last_scraped_at as string | null),
+    startDate,
     showBrowser: false,
     verbose: false,
     // Required for Chromium running inside Docker containers:
