@@ -55,14 +55,15 @@ async function pollAndProcess(): Promise<void> {
 
   for (const row of jobs) {
     // Claim the job atomically — only process if we can flip it to 'running'
-    const { count } = await supabase
+    const { data: claimed } = await supabase
       .from('scrape_jobs')
       .update({ status: 'running', started_at: new Date().toISOString() })
       .eq('id', row.id)
       .eq('status', 'queued')   // guard against double-claiming
-      .select('id', { count: 'exact', head: true })
+      .select('id')
+      .single()
 
-    if (!count) continue   // another worker claimed it first
+    if (!claimed) continue   // another worker claimed it first
 
     activeJobs++
     console.log(`[poller] claimed job=${row.id} bankAccountId=${row.bank_account_id}`)
