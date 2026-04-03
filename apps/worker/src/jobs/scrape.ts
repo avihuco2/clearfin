@@ -77,16 +77,16 @@ async function waitForOtp(bankAccountId: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 function resolveStartDate(lastScrapedAt: string | null): Date {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
 
   if (!lastScrapedAt) {
-    // First scrape — fetch 6 months of history
-    return new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
+    // First scrape — fetch 3 months of history
+    return threeMonthsAgo
   }
 
   const lastSync = new Date(lastScrapedAt)
-  // Use the more recent of: last sync date vs 30 days ago
-  return lastSync > thirtyDaysAgo ? lastSync : thirtyDaysAgo
+  // Use the more recent of: last sync date vs 3 months ago
+  return lastSync > threeMonthsAgo ? lastSync : threeMonthsAgo
 }
 
 // ---------------------------------------------------------------------------
