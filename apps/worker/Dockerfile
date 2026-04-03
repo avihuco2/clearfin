@@ -13,23 +13,32 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-# Copy workspace manifests first for better layer caching
 COPY package*.json ./
 COPY packages/crypto/package.json ./packages/crypto/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
 
-# Install all workspace deps (includes @clearfin/crypto resolution)
 RUN npm install --workspace=apps/worker
 
-# Copy source after install to avoid cache busting on code-only changes
 COPY packages/crypto ./packages/crypto
 COPY apps/worker ./apps/worker
 
 WORKDIR /app/apps/worker
 
+# Bundle everything into one JS file — fast startup, no module resolution issues
+RUN /app/node_modules/.bin/esbuild src/index.ts \
+    --bundle \
+    --platform=node \
+    --target=node22 \
+    --outfile=dist/index.js \
+    --external:israeli-bank-scrapers \
+    --external:puppeteer \
+    --external:@supabase/supabase-js \
+    --external:@upstash/redis \
+    --external:node-cron \
+    --format=cjs
+
 EXPOSE 10000
 
-# Run as non-root for security
 USER node
 
-CMD ["/app/node_modules/.bin/tsx", "src/index.ts"]
+CMD ["node", "dist/index.js"]
