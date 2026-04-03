@@ -48,7 +48,12 @@ export function ScrapeButton({ accountId, status }: ScrapeButtonProps) {
         type="button"
         onClick={handleScrape}
         disabled={isDisabled}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          background: 'var(--color-primary-dim)',
+          color: 'var(--color-primary)',
+          border: '0.5px solid rgba(6,182,212,0.25)',
+        }}
         aria-label="הפעל סריקה"
       >
         {loading || status === 'running' ? (
