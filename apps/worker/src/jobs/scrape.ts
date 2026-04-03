@@ -83,7 +83,7 @@ export async function processScrapeJob(
   const { data: account, error: fetchError } = await supabase
     .from('bank_accounts')
     .select(
-      'company_id, encrypted_credentials, credentials_iv, credentials_tag',
+      'company_id, encrypted_credentials, credentials_iv, credentials_tag, last_scraped_at',
     )
     .eq('id', bankAccountId)
     .eq('user_id', userId)
@@ -140,7 +140,11 @@ export async function processScrapeJob(
   // ------------------------------------------------------------------
   const scraper = createScraper({
     companyId: account.company_id as CompanyTypes,
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    // First scrape (no prior history): go back 1 year.
+    // Subsequent scrapes: go back 60 days to catch late-posted transactions.
+    startDate: new Date(Date.now() - (triggeredBy === 'manual' && !account.last_scraped_at
+      ? 365
+      : 60) * 24 * 60 * 60 * 1000),
     showBrowser: false,
     verbose: false,
   })
