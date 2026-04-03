@@ -202,6 +202,8 @@ export async function processScrapeJob(
   }
 
   if (!result.success) {
+    // Log errorMessage for debugging (contains no credentials)
+    console.error(`[scrape] job=${job.id} errorType=${result.errorType} errorMessage=${result.errorMessage ?? 'none'}`)
     const errorMessage = result.errorType ?? 'SCRAPE_FAILED'
     await markError(bankAccountId, String(job.id), errorMessage)
     throw new Error(errorMessage)
