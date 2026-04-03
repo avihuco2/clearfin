@@ -1,52 +1,81 @@
-import { Worker } from 'bullmq'
 import cron from 'node-cron'
-import { bullConnection } from './lib/redis.js'
+import { supabase } from './lib/supabase.js'
 import { processScrapeJob } from './jobs/scrape.js'
-import type { ScrapeJobData, ScrapeJobResult } from './jobs/scrape.js'
+import type { ScrapeJobData } from './jobs/scrape.js'
 
-const QUEUE_NAME = 'scrape'
 const concurrency = parseInt(process.env['WORKER_CONCURRENCY'] ?? '3', 10)
+const POLL_INTERVAL_MS = 8_000   // poll DB every 8 seconds
+
+let activeJobs = 0
 
 // ---------------------------------------------------------------------------
-// BullMQ worker
-// bullConnection is an ioredis instance — the only connection type BullMQ accepts.
+// DB poller — picks up queued jobs from the scrape_jobs table.
+// No BullMQ/Redis required. Any scrape triggered from the web app
+// (manual button, cron endpoint) inserts a row with status='queued';
+// this loop claims and processes it.
 // ---------------------------------------------------------------------------
 
-const worker = new Worker<ScrapeJobData, ScrapeJobResult>(
-  QUEUE_NAME,
-  processScrapeJob,
-  {
-    connection: bullConnection,
-    concurrency,
-  },
-)
+async function pollAndProcess(): Promise<void> {
+  if (activeJobs >= concurrency) return
 
-worker.on('completed', (job, result) => {
-  console.log(
-    `[worker] completed job=${job.id} transactionsAdded=${result.transactionsAdded}`,
-  )
-})
+  const slots = concurrency - activeJobs
+  const { data: jobs, error } = await supabase
+    .from('scrape_jobs')
+    .select('id, user_id, bank_account_id, triggered_by')
+    .eq('status', 'queued')
+    .order('created_at', { ascending: true })
+    .limit(slots)
 
-worker.on('failed', (job, err) => {
-  // Log message only — never log the full error object which may contain a stack
-  // trace referencing credential variables
-  console.error(`[worker] failed job=${job?.id ?? 'unknown'}: ${err.message}`)
-})
+  if (error) {
+    console.error('[poller] failed to fetch queued jobs:', error.message)
+    return
+  }
+  if (!jobs?.length) return
 
-worker.on('error', (err) => {
-  console.error(`[worker] connection error: ${err.message}`)
-})
+  for (const row of jobs) {
+    // Claim the job atomically — only process if we can flip it to 'running'
+    const { count } = await supabase
+      .from('scrape_jobs')
+      .update({ status: 'running', started_at: new Date().toISOString() })
+      .eq('id', row.id)
+      .eq('status', 'queued')   // guard against double-claiming
+      .select('id', { count: 'exact', head: true })
 
-console.log(
-  `[worker] started queue=${QUEUE_NAME} concurrency=${concurrency}`,
-)
+    if (!count) continue   // another worker claimed it first
+
+    activeJobs++
+    console.log(`[poller] claimed job=${row.id} bankAccountId=${row.bank_account_id}`)
+
+    const jobData: ScrapeJobData = {
+      userId:        row.user_id as string,
+      bankAccountId: row.bank_account_id as string,
+      triggeredBy:   (row.triggered_by as 'manual' | 'schedule') ?? 'manual',
+    }
+
+    // Run in background — don't await so poller can continue
+    processScrapeJob({ id: row.id, data: jobData } as never)
+      .then(result => {
+        console.log(`[poller] job=${row.id} done transactionsAdded=${result.transactionsAdded}`)
+      })
+      .catch(err => {
+        console.error(`[poller] job=${row.id} failed:`, err instanceof Error ? err.message : err)
+      })
+      .finally(() => { activeJobs-- })
+  }
+}
+
+// Start polling
+const pollInterval = setInterval(() => { void pollAndProcess() }, POLL_INTERVAL_MS)
+console.log(`[worker] started — polling DB every ${POLL_INTERVAL_MS / 1000}s, concurrency=${concurrency}`)
+
+// Run immediately on start
+void pollAndProcess()
 
 // ---------------------------------------------------------------------------
 // Scheduled scraping — every 6 hours, calls the web app's cron endpoint.
-// Runs inside Railway so Vercel Hobby plan cron restrictions don't apply.
 // ---------------------------------------------------------------------------
 
-const WEB_URL = process.env['WEB_URL']
+const WEB_URL    = process.env['WEB_URL']
 const CRON_SECRET = process.env['CRON_SECRET']
 
 if (WEB_URL && CRON_SECRET) {
@@ -61,11 +90,10 @@ if (WEB_URL && CRON_SECRET) {
         const body = await res.json() as { enqueued?: number }
         console.log(`[cron] enqueued ${body.enqueued ?? 0} scrape jobs`)
       } else {
-        console.error(`[cron] cron endpoint returned ${res.status}`)
+        console.error(`[cron] endpoint returned ${res.status}`)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error(`[cron] fetch failed: ${message}`)
+      console.error(`[cron] fetch failed:`, err instanceof Error ? err.message : err)
     }
   })
   console.log('[cron] scheduled scrape every 6 hours')
@@ -74,22 +102,21 @@ if (WEB_URL && CRON_SECRET) {
 }
 
 // ---------------------------------------------------------------------------
-// Graceful shutdown on SIGTERM (Railway sends this before container stop)
+// Graceful shutdown
 // ---------------------------------------------------------------------------
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`[worker] received ${signal} — shutting down gracefully`)
-  try {
-    // close() waits for active jobs to finish before stopping
-    await worker.close()
-    console.log('[worker] shutdown complete')
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error(`[worker] error during shutdown: ${message}`)
-  } finally {
-    process.exit(0)
+  console.log(`[worker] ${signal} — shutting down`)
+  clearInterval(pollInterval)
+
+  // Wait up to 30s for active jobs to finish
+  const deadline = Date.now() + 30_000
+  while (activeJobs > 0 && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500))
   }
+  console.log('[worker] shutdown complete')
+  process.exit(0)
 }
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'))
-process.on('SIGINT', () => void shutdown('SIGINT'))
+process.on('SIGINT',  () => void shutdown('SIGINT'))

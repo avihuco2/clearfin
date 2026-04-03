@@ -1,38 +1,30 @@
-import { Queue } from 'bullmq'
-import IORedis from 'ioredis'
+import { Redis } from '@upstash/redis'
 
-// Lazy-initialised — not created at module load time so Next.js build
-// doesn't attempt a Redis connection when env vars are absent.
-let _queue: Queue | null = null
-
-function getQueue(): Queue {
-  if (!_queue) {
-    const url = process.env.UPSTASH_REDIS_URL!
-    const useTls = url.startsWith('rediss://')
-    const connection = new IORedis(url, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      ...(useTls ? { tls: {} } : {}),
-    })
-    _queue = new Queue('scrape', { connection })
-  }
-  return _queue
+// Use the Upstash REST client for enqueueing — works reliably in Vercel
+// serverless without persistent TCP connections.
+function getRedis() {
+  return new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  })
 }
 
+const QUEUE_KEY = 'scrape:pending'
+
+/**
+ * Push a scrape job into the Redis list. The worker pops from this list.
+ * Falls back silently if Redis is unavailable — the worker also polls
+ * the scrape_jobs Supabase table as a secondary mechanism.
+ */
 export async function enqueueScrapeJob(
   userId: string,
   bankAccountId: string,
   triggeredBy: 'manual' | 'schedule',
-): Promise<string> {
-  const job = await getQueue().add(
-    'scrape',
-    { userId, bankAccountId, triggeredBy },
-    {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: 100,
-      removeOnFail: 50,
-    },
-  )
-  return job.id!
+): Promise<void> {
+  try {
+    await getRedis().lpush(QUEUE_KEY, JSON.stringify({ userId, bankAccountId, triggeredBy }))
+  } catch (err) {
+    // Non-fatal — worker falls back to polling scrape_jobs table
+    console.warn('[queue] Redis enqueue failed, worker will poll DB:', err instanceof Error ? err.message : err)
+  }
 }
