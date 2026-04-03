@@ -34,7 +34,7 @@ export default function LoginPage() {
       <div aria-hidden="true" className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-64 w-64 rounded-full bg-[rgba(6,182,212,0.08)] blur-3xl" />
 
       {/* Card */}
-      <div className="glass-strong relative w-full max-w-sm rounded-2xl p-8 animate-fade-up">
+      <div className="glass-strong relative w-full max-w-sm rounded-2xl p-8 animate-fade-up" style={{ borderRadius: '24px' }}>
 
         {/* Logo */}
         <div className="mb-10 text-center">

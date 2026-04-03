@@ -52,10 +52,11 @@ export function BottomNav() {
     <nav
       className="fixed inset-x-0 bottom-0 z-40 md:hidden"
       style={{
-        background: 'rgba(7,11,18,0.92)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderTop: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(6,10,18,0.65)',
+        backdropFilter: 'blur(40px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+        borderTop: '0.5px solid rgba(255,255,255,0.1)',
+        boxShadow: 'inset 0 0.5px 0 rgba(255,255,255,0.06)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
       aria-label="ניווט ראשי"

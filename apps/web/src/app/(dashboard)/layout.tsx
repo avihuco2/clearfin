@@ -22,8 +22,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <aside
         className="fixed inset-y-0 end-0 hidden w-60 md:flex md:flex-col"
         style={{
-          background: 'var(--color-sidebar)',
-          borderInlineStart: '1px solid var(--color-border)',
+          background: 'rgba(6,10,18,0.72)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          borderInlineStart: '0.5px solid rgba(255,255,255,0.08)',
         }}
       >
         <SidebarNav displayName={displayName} />
