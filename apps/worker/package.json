@@ -4,17 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package --patch-dir patches",
     "dev": "tsx watch src/index.ts",
     "start": "node --experimental-vm-modules dist/index.js",
     "build": "tsc",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@clearfin/crypto": "*",
     "@supabase/supabase-js": "^2.49.0",
     "@upstash/redis": "^1.34.0",
     "israeli-bank-scrapers": "^6.7.1",
     "node-cron": "^3.0.3",
-    "@clearfin/crypto": "*"
+    "patch-package": "^8.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

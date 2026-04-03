@@ -1,0 +1,31 @@
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js b/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
+index ab8e48d..d8f638d 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
+@@ -21,7 +21,7 @@ const BASE_API_ACTIONS_URL = 'https://onlinelcapi.max.co.il';
+ const BASE_WELCOME_URL = 'https://www.max.co.il';
+ const LOGIN_URL = `${BASE_WELCOME_URL}/login`;
+ const PASSWORD_EXPIRED_URL = `${BASE_WELCOME_URL}/renew-password`;
+-const SUCCESS_URL = `${BASE_WELCOME_URL}/homepage/personal`;
++const SUCCESS_URL_REGEX = /max\.co\.il\/.*\/personal/; const SUCCESS_URL = `${BASE_WELCOME_URL}/homepage/personal`;
+ var MaxPlanName = /*#__PURE__*/function (MaxPlanName) {
+   MaxPlanName["Normal"] = "\u05E8\u05D2\u05D9\u05DC\u05D4";
+   MaxPlanName["ImmediateCharge"] = "\u05D7\u05D9\u05D5\u05D1 \u05E2\u05E1\u05E7\u05D5\u05EA \u05DE\u05D9\u05D9\u05D3\u05D9";
+@@ -242,7 +242,7 @@ async function fetchTransactions(page, options) {
+ }
+ function getPossibleLoginResults(page) {
+   const urls = {};
+-  urls[_baseScraperWithBrowser.LoginResults.Success] = [SUCCESS_URL];
++  urls[_baseScraperWithBrowser.LoginResults.Success] = [SUCCESS_URL, `${BASE_WELCOME_URL}/insurance/personal`];
+   urls[_baseScraperWithBrowser.LoginResults.ChangePassword] = [PASSWORD_EXPIRED_URL];
+   urls[_baseScraperWithBrowser.LoginResults.InvalidPassword] = [async () => {
+     return (0, _elementsInteractions.elementPresentOnPage)(page, INVALID_DETAILS_SELECTOR);
+@@ -280,7 +280,7 @@ class MaxScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+         await (0, _elementsInteractions.waitUntilElementFound)(this.page, '#login-password.tab-pane.active app-user-login-form', true);
+       },
+       checkReadiness: async () => {
+-        await (0, _elementsInteractions.waitUntilElementFound)(this.page, '.personal-area > a.go-to-personal-area', true);
++        try { await (0, _elementsInteractions.waitUntilElementFound)(this.page, '.personal-area > a.go-to-personal-area', false); } catch(e) { /* selector changed, proceed anyway */ }
+       },
+       postAction: async () => redirectOrDialog(this.page),
+       possibleResults: getPossibleLoginResults(this.page),
