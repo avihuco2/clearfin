@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { formatDate } from '@/lib/format'
 import { ScrapeButton } from '@/components/scrape-button'
+import { AccountActions } from '@/components/account-actions'
 
 type ScrapeStatus = 'idle' | 'running' | 'done' | 'error' | 'awaiting_otp'
 
@@ -26,30 +27,12 @@ const COMPANY_LABELS: Record<string, string> = {
   amex: 'אמריקן אקספרס',
 }
 
-const STATUS_CONFIG: Record<
-  ScrapeStatus,
-  { label: string; className: string }
-> = {
-  idle: {
-    label: 'ממתין',
-    className: 'bg-gray-100 text-gray-700',
-  },
-  running: {
-    label: 'מריץ',
-    className: 'bg-blue-100 text-blue-700',
-  },
-  done: {
-    label: 'הושלם',
-    className: 'bg-green-100 text-green-700',
-  },
-  error: {
-    label: 'שגיאה',
-    className: 'bg-red-100 text-red-700',
-  },
-  awaiting_otp: {
-    label: 'ממתין לקוד',
-    className: 'bg-yellow-100 text-yellow-700',
-  },
+const STATUS_CONFIG: Record<ScrapeStatus, { label: string; bg: string; color: string }> = {
+  idle:         { label: 'ממתין',      bg: 'rgba(255,255,255,0.06)', color: 'var(--color-foreground-dim)' },
+  running:      { label: 'סורק...',    bg: 'rgba(6,182,212,0.12)',   color: 'var(--color-primary)' },
+  done:         { label: 'הושלם',      bg: 'rgba(16,185,129,0.12)',  color: 'var(--color-success)' },
+  error:        { label: 'שגיאה',      bg: 'rgba(244,63,94,0.12)',   color: 'var(--color-danger)' },
+  awaiting_otp: { label: 'ממתין לקוד', bg: 'rgba(245,158,11,0.12)', color: 'var(--color-gold)' },
 }
 
 export default async function AccountsPage() {
@@ -171,34 +154,33 @@ function AccountCard({ account }: { account: BankAccount }) {
   const companyLabel = COMPANY_LABELS[account.company_id] ?? account.company_id
 
   return (
-    <li className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 shadow-sm">
+    <li className="glass-card p-5">
       <div className="flex items-start justify-between gap-4">
         {/* Account info */}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-semibold text-[var(--color-foreground)]">
               {account.display_name ?? companyLabel}
             </h3>
             <span
-              className={[
-                'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                statusCfg.className,
-              ].join(' ')}
+              className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+              style={{ background: statusCfg.bg, color: statusCfg.color }}
             >
               {statusCfg.label}
             </span>
           </div>
-          <p className="mt-0.5 text-sm text-[var(--color-muted-foreground)]">{companyLabel}</p>
+          <p className="mt-0.5 text-sm text-[var(--color-foreground-muted)]">{companyLabel}</p>
           {account.last_scraped_at && (
-            <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+            <p className="mt-1 text-xs text-[var(--color-foreground-dim)]">
               עדכון אחרון: {formatDate(account.last_scraped_at)}
             </p>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <ScrapeButton accountId={account.id} status={status} />
+          <AccountActions accountId={account.id} companyId={account.company_id} displayName={account.display_name} />
         </div>
       </div>
     </li>

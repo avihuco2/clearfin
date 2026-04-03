@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { API_ROUTES } from '@/lib/api-routes'
 
 type ScrapeStatus = 'idle' | 'running' | 'done' | 'error' | 'awaiting_otp'
 
@@ -22,13 +21,12 @@ export function ScrapeButton({ accountId, status }: ScrapeButtonProps) {
     setLoading(true)
     setErrorMsg(null)
     try {
-      const res = await fetch(API_ROUTES.scrape.trigger, {
+      const res = await fetch(`/api/accounts/${accountId}/scrape`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId }),
       })
+      const body = await res.json() as { error?: string }
       if (!res.ok) {
-        setErrorMsg('שגיאה בהפעלת הסריקה')
+        setErrorMsg(body.error ?? 'שגיאה בהפעלת הסריקה')
         return
       }
       router.refresh()
@@ -41,9 +39,7 @@ export function ScrapeButton({ accountId, status }: ScrapeButtonProps) {
 
   return (
     <div>
-      {errorMsg && (
-        <p className="mb-1 text-xs text-red-600">{errorMsg}</p>
-      )}
+      {errorMsg && <p className="mb-1 text-xs" style={{ color: 'var(--color-danger)' }}>{errorMsg}</p>}
       <button
         type="button"
         onClick={handleScrape}
@@ -59,17 +55,7 @@ export function ScrapeButton({ accountId, status }: ScrapeButtonProps) {
         {loading || status === 'running' ? (
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
         ) : (
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
           </svg>
         )}
