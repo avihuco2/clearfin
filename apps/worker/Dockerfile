@@ -23,6 +23,9 @@ RUN npm install --workspace=apps/worker
 COPY packages/crypto ./packages/crypto
 COPY apps/worker ./apps/worker
 
+# Patch israeli-bank-scrapers: fix Max post-login URL change
+RUN node apps/worker/scripts/patch-max.js
+
 WORKDIR /app/apps/worker
 
 # Bundle everything into one JS file — fast startup, no module resolution issues

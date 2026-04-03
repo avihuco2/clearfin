@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "patch-package --patch-dir patches",
     "dev": "tsx watch src/index.ts",
     "start": "node --experimental-vm-modules dist/index.js",
     "build": "tsc",
