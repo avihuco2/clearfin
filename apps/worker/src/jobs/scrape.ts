@@ -215,7 +215,10 @@ export async function processScrapeJob(
   let transactionsAdded = 0
   const accounts = result.accounts ?? []
 
+  console.log(`[scrape] job=${job.id} accounts=${accounts.length} totalTxns=${accounts.reduce((s, a) => s + a.txns.length, 0)}`)
+
   for (const acc of accounts) {
+    console.log(`[scrape] job=${job.id} account=${acc.accountNumber ?? 'unknown'} txns=${acc.txns.length}`)
     // Persist latest balance when available
     if (acc.balance !== undefined) {
       await supabase
@@ -257,13 +260,10 @@ export async function processScrapeJob(
       })
 
     if (upsertError) {
-      // Log account id only — never log transaction content
-      console.error(
-        `[scrape] upsert error bankAccountId=${bankAccountId}:`,
-        upsertError.message,
-      )
+      console.error(`[scrape] upsert error bankAccountId=${bankAccountId}:`, upsertError.message, upsertError.code, upsertError.details)
     }
 
+    console.log(`[scrape] job=${job.id} upsert count=${count} error=${upsertError?.message ?? 'none'}`)
     transactionsAdded += count ?? 0
   }
 
