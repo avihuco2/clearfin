@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   // Fetch uncategorized transactions
   let query = supabase
     .from('transactions')
-    .select('id, description')
+    .select('id, description, memo')
     .is('category_id', null)
     .eq('user_id', user.id)
     .limit(200)
@@ -36,27 +36,32 @@ export async function POST(req: NextRequest) {
 
   const { data: transactions, error: txError } = await query
   if (txError) return Response.json({ error: 'Failed to fetch transactions' }, { status: 500 })
-  if (!transactions?.length) return Response.json({ categorized: 0 })
+  if (!transactions?.length) return Response.json({ categorized: 0, newCategories: 0 })
 
-  // Fetch available category ids + Hebrew names for the prompt
-  const { data: categories } = await supabase
+  // Fetch all available categories (system + user's own)
+  const { data: categoriesData } = await supabase
     .from('categories')
     .select('id, name_he')
     .or(`user_id.is.null,user_id.eq.${user.id}`)
 
-  const categoryMap = Object.fromEntries((categories ?? []).map(c => [c.name_he, c.id]))
-  const categoryList = Object.keys(categoryMap).join(', ')
+  // Mutable map — grows as new categories are created during this run
+  const categoryMap = new Map<string, string>(
+    (categoriesData ?? []).map((c) => [c.name_he, c.id]),
+  )
 
   let totalCategorized = 0
+  let totalNewCategories = 0
 
-  // Process in batches of BATCH_SIZE
   for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
     const batch = transactions.slice(i, i + BATCH_SIZE)
-    const descriptions = batch.map((t, idx) => `${idx}: ${t.description}`).join('\n')
+    const descriptions = batch
+      .map((t, idx) => `${idx}: ${t.description}${t.memo ? ` (${t.memo})` : ''}`)
+      .join('\n')
 
     const prompt =
-      `קטגוריות זמינות: ${categoryList}\n\n` +
-      `סווג כל עסקה לקטגוריה המתאימה ביותר. החזר JSON בפורמט: {"0":"קטגוריה","1":"קטגוריה",...}\n\n` +
+      `קטגוריות קיימות: ${Array.from(categoryMap.keys()).join(', ')}\n\n` +
+      `סווג כל עסקה לקטגוריה המתאימה. אם אף קטגוריה קיימת לא מתאימה, המצא שם קטגוריה חדש בעברית (קצר, 1-3 מילים).\n` +
+      `החזר JSON בלבד בפורמט: {"0":"שם קטגוריה","1":"שם קטגוריה",...}\n\n` +
       `עסקאות:\n${descriptions}`
 
     let result: Record<string, string> = {}
@@ -70,15 +75,30 @@ export async function POST(req: NextRequest) {
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, string>
     } catch {
-      // Skip batch on model error; don't surface details to client
       continue
     }
 
-    // Upsert categories
+    // Create any new categories the AI suggested
+    for (const categoryName of Object.values(result)) {
+      if (!categoryName || categoryMap.has(categoryName)) continue
+
+      const { data: created } = await supabase
+        .from('categories')
+        .insert({ user_id: user.id, name_he: categoryName })
+        .select('id, name_he')
+        .single()
+
+      if (created) {
+        categoryMap.set(created.name_he, created.id)
+        totalNewCategories++
+      }
+    }
+
+    // Apply categorizations
     const updates = batch
       .map((t, idx) => {
         const categoryName = result[String(idx)]
-        const categoryId = categoryName ? categoryMap[categoryName] : undefined
+        const categoryId = categoryName ? categoryMap.get(categoryName) : undefined
         return categoryId ? { id: t.id, category_id: categoryId } : null
       })
       .filter(Boolean) as Array<{ id: string; category_id: string }>
@@ -94,5 +114,5 @@ export async function POST(req: NextRequest) {
     totalCategorized += updates.length
   }
 
-  return Response.json({ categorized: totalCategorized })
+  return Response.json({ categorized: totalCategorized, newCategories: totalNewCategories })
 }
