@@ -164,6 +164,22 @@ export async function processScrapeJob(
     startDate: resolveStartDate(account.last_scraped_at as string | null),
     showBrowser: false,
     verbose: false,
+    // Required for Chromium running inside Docker containers:
+    // --no-sandbox: container runs as non-root without kernel namespaces
+    // --disable-dev-shm-usage: /dev/shm is tiny in containers, use /tmp instead
+    // --disable-gpu: no GPU in headless server environment
+    puppeteerConfig: {
+      executablePath: process.env['PUPPETEER_EXECUTABLE_PATH'] ?? '/usr/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+      ],
+    },
   })
 
   scraper.onProgress((companyId, { type }) => {
