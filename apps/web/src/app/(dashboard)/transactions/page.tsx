@@ -27,6 +27,7 @@ interface Transaction {
   category_id: string | null
   bank_account_id: string
   status: string | null
+  sub_account: string | null
 }
 
 interface BankAccount {
@@ -85,7 +86,7 @@ export default async function TransactionsPage({
   let query = supabase
     .from('transactions')
     .select(
-      'id, date, description, charged_amount, charged_currency, category_id, bank_account_id, status',
+      'id, date, description, charged_amount, charged_currency, category_id, bank_account_id, status, sub_account',
       { count: 'exact' },
     )
     .order('date', { ascending: false })
@@ -217,6 +218,12 @@ export default async function TransactionsPage({
                     scope="col"
                     className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
                   >
+                    מידע נוסף
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                  >
                     חשבון
                   </th>
                 </tr>
@@ -253,9 +260,11 @@ export default async function TransactionsPage({
                         />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
+                        {tx.sub_account ? `****${tx.sub_account.slice(-4)}` : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
                         {account
                           ? (account.display_name ?? COMPANY_LABELS[account.company_id] ?? account.company_id)
-                            + (account.account_number ? ` ****${account.account_number.slice(-4)}` : '')
                           : '—'}
                       </td>
                     </tr>

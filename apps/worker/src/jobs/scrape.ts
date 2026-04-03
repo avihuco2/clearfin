@@ -264,6 +264,7 @@ export async function processScrapeJob(
       status: txn.status,
       installment_number: txn.installments?.number ?? null,
       installment_total: txn.installments?.total ?? null,
+      sub_account: acc.accountNumber ?? null,
     }))
 
     const { count, error: upsertError } = await supabase
