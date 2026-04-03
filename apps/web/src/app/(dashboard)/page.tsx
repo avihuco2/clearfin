@@ -56,7 +56,7 @@ export default async function DashboardPage() {
             ברוך הבא לניהול הפיננסי שלך
           </p>
         </div>
-        {hasAccounts && <ScrapeAllButton />}
+        <ScrapeAllButton />
       </div>
 
       {hasAccounts ? (
