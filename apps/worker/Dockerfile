@@ -35,7 +35,7 @@ RUN /app/node_modules/.bin/esbuild src/index.ts \
     --external:@supabase/supabase-js \
     --external:@upstash/redis \
     --external:node-cron \
-    --format=cjs
+    --format=esm
 
 EXPOSE 10000
 
