@@ -24,7 +24,7 @@ COPY packages/crypto ./packages/crypto
 COPY apps/worker ./apps/worker
 
 # Patch israeli-bank-scrapers: fix Max post-login URL change
-RUN node apps/worker/scripts/patch-max.js
+RUN node apps/worker/scripts/patch-max.cjs
 
 WORKDIR /app/apps/worker
 
