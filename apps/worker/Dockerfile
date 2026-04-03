@@ -27,6 +27,8 @@ COPY apps/worker ./apps/worker
 
 WORKDIR /app/apps/worker
 
+EXPOSE 10000
+
 # Run as non-root for security
 USER node
 

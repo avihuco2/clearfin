@@ -1,3 +1,4 @@
+import http from 'node:http'
 import cron from 'node-cron'
 import { supabase } from './lib/supabase.js'
 import { processScrapeJob } from './jobs/scrape.js'
@@ -5,6 +6,26 @@ import type { ScrapeJobData } from './jobs/scrape.js'
 
 const concurrency = parseInt(process.env['WORKER_CONCURRENCY'] ?? '3', 10)
 const POLL_INTERVAL_MS = 8_000   // poll DB every 8 seconds
+const PORT = parseInt(process.env['PORT'] ?? '10000', 10)
+
+// ---------------------------------------------------------------------------
+// Health check server — required by Render Web Service.
+// Also used by UptimeRobot to keep the free tier from spinning down.
+// ---------------------------------------------------------------------------
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ status: 'ok', activeJobs, uptime: process.uptime() }))
+  } else {
+    res.writeHead(404)
+    res.end()
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`[health] listening on port ${PORT}`)
+})
 
 let activeJobs = 0
 
@@ -108,6 +129,7 @@ if (WEB_URL && CRON_SECRET) {
 async function shutdown(signal: string): Promise<void> {
   console.log(`[worker] ${signal} — shutting down`)
   clearInterval(pollInterval)
+  server.close()
 
   // Wait up to 30s for active jobs to finish
   const deadline = Date.now() + 30_000
