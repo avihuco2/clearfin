@@ -14,10 +14,15 @@ const after1  = "urls[_baseScraperWithBrowser.LoginResults.Success] = [SUCCESS_U
 const before2 = "await (0, _elementsInteractions.waitUntilElementFound)(this.page, '.personal-area > a.go-to-personal-area', true);";
 const after2  = "try { await (0, _elementsInteractions.waitUntilElementFound)(this.page, '.personal-area > a.go-to-personal-area', false); } catch(e) {}";
 
+// 3. Treat unknown transaction types as Normal instead of throwing
+const before3 = "throw new Error(`Unknown transaction type ${cleanedUpTxnTypeStr}`);";
+const after3  = "return _transactions2.TransactionTypes.Normal;";
+
 let patched = 0;
 if (content.includes(before1)) { content = content.replace(before1, after1); patched++; }
 if (content.includes(before2)) { content = content.replace(before2, after2); patched++; }
+if (content.includes(before3)) { content = content.replace(before3, after3); patched++; }
 
 fs.writeFileSync(filePath, content);
-console.log(`[patch-max] applied ${patched}/2 patches to max.js`);
-if (patched < 2) process.exit(1);
+console.log(`[patch-max] applied ${patched}/3 patches to max.js`);
+if (patched < 3) process.exit(1);
