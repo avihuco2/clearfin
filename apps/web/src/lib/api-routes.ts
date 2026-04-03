@@ -23,6 +23,7 @@ export const API_ROUTES = {
   categorize: {
     trigger: '/api/categorize' as const,
   },
+  scrapeAll: '/api/scrape/all' as const,
   dashboard: {
     summary: '/api/dashboard/summary' as const,
   },

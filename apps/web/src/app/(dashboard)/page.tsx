@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { formatCurrency } from '@/lib/format'
+import { ScrapeAllButton } from '@/components/scrape-all-button'
 
 export default async function DashboardPage() {
   const supabase = createServerComponentClient({ cookies })
@@ -46,13 +47,16 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Greeting */}
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-foreground)]">
-          שלום, {displayName}
-        </h1>
-        <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-          ברוך הבא לניהול הפיננסי שלך
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-foreground)]">
+            שלום, {displayName}
+          </h1>
+          <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+            ברוך הבא לניהול הפיננסי שלך
+          </p>
+        </div>
+        {hasAccounts && <ScrapeAllButton />}
       </div>
 
       {hasAccounts ? (
