@@ -32,4 +32,4 @@ EXPOSE 10000
 # Run as non-root for security
 USER node
 
-CMD ["node_modules/.bin/tsx", "src/index.ts"]
+CMD ["/app/node_modules/.bin/tsx", "src/index.ts"]
