@@ -1,9 +1,8 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import Anthropic from '@anthropic-ai/sdk'
+import { anthropic } from '@ai-sdk/anthropic'
+import { generateText } from 'ai'
 import { createServerClient } from '@/lib/supabase/server'
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const TriggerSchema = z.object({
   bankAccountId: z.string().uuid().optional(),
@@ -12,6 +11,7 @@ const TriggerSchema = z.object({
 })
 
 const BATCH_SIZE = 50
+const MODEL = anthropic('claude-haiku-4.5')
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient()
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (txError || !tx) {
+      console.error('[categorize] tx fetch error:', txError)
       return Response.json({ error: 'עסקה לא נמצאה' }, { status: 404 })
     }
 
@@ -60,18 +61,14 @@ export async function POST(req: NextRequest) {
 
     let categoryName: string | null = null
     try {
-      const message = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 256,
-        messages: [{ role: 'user', content: prompt }],
-      })
-      const text = message.content[0]?.type === 'text' ? message.content[0].text : ''
+      const { text } = await generateText({ model: MODEL, prompt })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as { category?: string }
-        categoryName = parsed.category ?? null
+        const result = JSON.parse(jsonMatch[0]) as { category?: string }
+        categoryName = result.category ?? null
       }
-    } catch {
+    } catch (err) {
+      console.error('[categorize] AI error:', err)
       return Response.json({ error: 'שגיאה בסיווג AI' }, { status: 500 })
     }
 
@@ -138,15 +135,11 @@ export async function POST(req: NextRequest) {
 
     let result: Record<string, string> = {}
     try {
-      const message = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }],
-      })
-      const text = message.content[0]?.type === 'text' ? message.content[0].text : ''
+      const { text } = await generateText({ model: MODEL, prompt, maxTokens: 1024 })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, string>
-    } catch {
+    } catch (err) {
+      console.error('[categorize] batch AI error:', err)
       continue
     }
 

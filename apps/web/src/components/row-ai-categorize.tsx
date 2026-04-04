@@ -44,50 +44,27 @@ export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategoriz
       aria-label="סווג אוטומטית עם בינה מלאכותית"
       title="סווג עם AI"
       className={[
-        'inline-flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-50',
+        'inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-medium transition-colors disabled:opacity-50',
         state === 'error'
-          ? 'text-red-500'
-          : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-primary)] hover:bg-[var(--color-accent)]',
+          ? 'border-red-300 bg-red-50 text-red-600'
+          : 'border-[var(--color-border)] bg-[var(--color-muted)]/60 text-[var(--color-muted-foreground)] hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]',
       ].join(' ')}
     >
       {state === 'loading' ? (
-        /* Spinning indicator */
         <span
-          className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent"
+          className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent"
           aria-hidden="true"
         />
       ) : state === 'error' ? (
-        /* Brief red flash — X icon */
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       ) : (
-        /* Sparkle / brain icon — a simple star-like SVG */
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
         </svg>
       )}
+      <span>{state === 'loading' ? 'מסווג...' : state === 'error' ? 'שגיאה' : 'AI'}</span>
     </button>
   )
 }

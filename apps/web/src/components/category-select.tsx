@@ -27,7 +27,6 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
-  // Keep selected in sync when server re-renders with a new currentCategoryId
   useEffect(() => {
     setSelected(currentCategoryId)
   }, [currentCategoryId])
@@ -35,6 +34,8 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
   useEffect(() => {
     if (showNewInput) inputRef.current?.focus()
   }, [showNewInput])
+
+  const selectedCategory = categories.find((c) => c.id === selected)
 
   async function saveCategory(categoryId: string | null) {
     setSaveState('saving')
@@ -90,14 +91,12 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
       const created = (await res.json()) as { id: string; name_he: string }
       const newCat = { id: created.id, name_he: created.name_he }
 
-      // Update shared context so all other CategorySelect instances see it immediately
       addCategory(newCat)
       setSelected(created.id)
       setShowNewInput(false)
       setNewName('')
 
       await saveCategory(created.id)
-      // Refresh server data so other sessions / future renders are up to date
       router.refresh()
     } catch {
       setSaveState('error')
@@ -107,46 +106,52 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
     }
   }
 
+  if (showNewInput) {
+    return (
+      <form onSubmit={handleCreateCategory} className="flex items-center gap-1">
+        <input
+          ref={inputRef}
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="שם קטגוריה"
+          dir="rtl"
+          maxLength={60}
+          className="w-28 rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-2 py-1 text-xs text-[var(--color-foreground)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+        />
+        <button
+          type="submit"
+          disabled={creating || !newName.trim()}
+          className="rounded px-1.5 py-1 text-xs font-medium text-[var(--color-primary)] disabled:opacity-40 hover:bg-[var(--color-accent)]"
+        >
+          {creating ? '...' : '✓'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowNewInput(false); setNewName('') }}
+          className="rounded px-1.5 py-1 text-xs text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
+        >
+          ✕
+        </button>
+      </form>
+    )
+  }
+
   return (
     <div className="flex items-center gap-1.5">
-      {showNewInput ? (
-        <form onSubmit={handleCreateCategory} className="flex items-center gap-1">
-          <input
-            ref={inputRef}
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="שם קטגוריה"
-            dir="rtl"
-            maxLength={60}
-            className="w-28 rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-2 py-1 text-xs text-[var(--color-foreground)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
-          />
-          <button
-            type="submit"
-            disabled={creating || !newName.trim()}
-            className="rounded px-1.5 py-1 text-xs font-medium text-[var(--color-primary)] disabled:opacity-40 hover:bg-[var(--color-accent)]"
-          >
-            {creating ? '...' : '✓'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowNewInput(false)
-              setNewName('')
-            }}
-            className="rounded px-1.5 py-1 text-xs text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
-          >
-            ✕
-          </button>
-        </form>
-      ) : (
+      <div className="relative">
         <select
           value={selected ?? ''}
           onChange={handleChange}
           disabled={saveState === 'saving'}
           dir="rtl"
           aria-label="בחר קטגוריה"
-          className="max-w-[160px] rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-2 py-1 text-xs text-[var(--color-foreground)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:opacity-60"
+          className={[
+            'h-7 max-w-[160px] cursor-pointer appearance-none rounded-full pe-5 ps-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+            selected
+              ? 'border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+              : 'border border-dashed border-[var(--color-border)] bg-transparent text-[var(--color-muted-foreground)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-foreground)]',
+          ].join(' ')}
         >
           <option value="">ללא קטגוריה</option>
           {categories.map((cat) => (
@@ -157,7 +162,22 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
           <option disabled>──────────</option>
           <option value={NEW_CATEGORY_VALUE}>+ הוסף קטגוריה</option>
         </select>
-      )}
+        {/* Chevron */}
+        <svg
+          className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 opacity-50"
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </div>
 
       {saveState === 'saving' && (
         <span
@@ -175,13 +195,15 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="text-green-600"
+          className="shrink-0 text-green-600"
           aria-label="נשמר"
         >
           <polyline points="20 6 9 17 4 12" />
         </svg>
       )}
-      {saveState === 'error' && <span className="text-xs text-red-600">שגיאה</span>}
+      {saveState === 'error' && (
+        <span className="text-xs text-red-600">שגיאה</span>
+      )}
     </div>
   )
 }
