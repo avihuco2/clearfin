@@ -144,6 +144,7 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
           value={selected ?? ''}
           onChange={handleChange}
           disabled={saveState === 'saving'}
+          dir="rtl"
           aria-label="בחר קטגוריה"
           className="max-w-[160px] rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-2 py-1 text-xs text-[var(--color-foreground)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] disabled:opacity-60"
         >
