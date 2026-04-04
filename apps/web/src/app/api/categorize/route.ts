@@ -11,7 +11,7 @@ const TriggerSchema = z.object({
 })
 
 const BATCH_SIZE = 50
-const MODEL = google('gemini-1.5-flash')
+const MODEL = google('gemini-1.5-flash-latest')
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient()
@@ -68,8 +68,9 @@ export async function POST(req: NextRequest) {
         categoryName = result.category ?? null
       }
     } catch (err) {
-      console.error('[categorize] AI error:', err)
-      return Response.json({ error: 'שגיאה בסיווג AI' }, { status: 500 })
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[categorize] AI error:', msg)
+      return Response.json({ error: `AI error: ${msg}` }, { status: 500 })
     }
 
     if (!categoryName) {

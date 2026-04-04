@@ -12,27 +12,31 @@ type ButtonState = 'idle' | 'loading' | 'error'
 
 export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategorizeProps) {
   const [state, setState] = useState<ButtonState>('idle')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const router = useRouter()
 
   async function handleClick() {
     if (state === 'loading') return
     setState('loading')
+    setErrorMsg(null)
     try {
       const res = await fetch('/api/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId }),
       })
-      if (!res.ok) throw new Error('categorize failed')
-      const data = (await res.json()) as { categoryId?: string }
+      const data = (await res.json()) as { categoryId?: string; error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'categorize failed')
       if (data.categoryId) {
         onCategorized?.(data.categoryId)
       }
       setState('idle')
       router.refresh()
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה'
+      setErrorMsg(msg)
       setState('error')
-      setTimeout(() => setState('idle'), 2000)
+      setTimeout(() => { setState('idle'); setErrorMsg(null) }, 5000)
     }
   }
 
@@ -42,7 +46,7 @@ export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategoriz
       onClick={handleClick}
       disabled={state === 'loading'}
       aria-label="סווג אוטומטית עם בינה מלאכותית"
-      title="סווג עם AI"
+      title={state === 'error' && errorMsg ? errorMsg : 'סווג עם AI'}
       className={[
         'inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-medium transition-colors disabled:opacity-50',
         state === 'error'
