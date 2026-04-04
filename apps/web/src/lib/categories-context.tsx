@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 
 export interface CategoryOption {
   id: string
@@ -27,6 +27,11 @@ export function CategoriesProvider({
   children: React.ReactNode
 }) {
   const [categories, setCategories] = useState<CategoryOption[]>(initial)
+
+  // Sync when server re-fetches (e.g. after router.refresh())
+  useEffect(() => {
+    setCategories(initial)
+  }, [initial])
 
   function addCategory(cat: CategoryOption) {
     setCategories((prev) =>

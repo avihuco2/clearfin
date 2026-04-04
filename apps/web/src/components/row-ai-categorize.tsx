@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useCategories } from '@/lib/categories-context'
 
 interface RowAiCategorizeProps {
   transactionId: string
@@ -14,6 +15,7 @@ export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategoriz
   const [state, setState] = useState<ButtonState>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const router = useRouter()
+  const { addCategory } = useCategories()
 
   async function handleClick() {
     if (state === 'loading') return
@@ -25,10 +27,25 @@ export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategoriz
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId }),
       })
-      const data = (await res.json()) as { categoryId?: string; error?: string }
+      const data = (await res.json()) as {
+        categoryId?: string
+        categoryName?: string
+        categoryIcon?: string | null
+        isNew?: boolean
+        error?: string
+      }
       if (!res.ok) throw new Error(data.error ?? 'categorize failed')
       if (data.categoryId) {
         onCategorized?.(data.categoryId)
+        // Immediately add new category to context so the select updates before refresh
+        if (data.isNew && data.categoryName) {
+          addCategory({
+            id: data.categoryId,
+            name_he: data.categoryName,
+            icon: data.categoryIcon ?? null,
+            color: null,
+          })
+        }
       }
       setState('idle')
       router.refresh()

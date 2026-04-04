@@ -30,12 +30,15 @@ export async function POST(req: NextRequest) {
   // Fetch all available categories (system + user's own)
   const { data: categoriesData } = await supabase
     .from('categories')
-    .select('id, name_he')
+    .select('id, name_he, icon')
     .or(`user_id.is.null,user_id.eq.${user.id}`)
 
-  // Mutable map — grows as new categories are created during this run
+  // Mutable maps — grow as new categories are created during this run
   const categoryMap = new Map<string, string>(
     (categoriesData ?? []).map((c) => [c.name_he, c.id]),
+  )
+  const iconMap = new Map<string, string>(
+    (categoriesData ?? []).filter((c) => c.icon).map((c) => [c.name_he, c.icon]),
   )
 
   // ── Single-transaction mode ──────────────────────────────────────────────
@@ -56,16 +59,19 @@ export async function POST(req: NextRequest) {
     const prompt =
       `קטגוריות קיימות: ${Array.from(categoryMap.keys()).join(', ')}\n\n` +
       `סווג את העסקה הבאה לקטגוריה המתאימה. אם אף קטגוריה קיימת לא מתאימה, המצא שם קטגוריה חדש בעברית (קצר, 1-3 מילים).\n` +
-      `החזר JSON בלבד בפורמט: {"category":"שם קטגוריה"}\n\n` +
+      `החזר JSON בלבד בפורמט: {"category":"שם קטגוריה","icon":"🔤"}\n` +
+      `ה-icon יהיה אמוג'י אחד המתאים לקטגוריה.\n\n` +
       `עסקה: ${description}`
 
     let categoryName: string | null = null
+    let categoryIcon: string | null = null
     try {
       const { text } = await generateText({ model: MODEL, prompt })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
-        const result = JSON.parse(jsonMatch[0]) as { category?: string }
+        const result = JSON.parse(jsonMatch[0]) as { category?: string; icon?: string }
         categoryName = result.category ?? null
+        categoryIcon = result.icon ?? null
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -79,16 +85,29 @@ export async function POST(req: NextRequest) {
 
     // Create new category if needed
     let categoryId = categoryMap.get(categoryName)
-    if (!categoryId) {
+    const isNew = !categoryId
+    if (isNew) {
       const { data: created } = await supabase
         .from('categories')
-        .insert({ user_id: user.id, name_he: categoryName })
-        .select('id, name_he')
+        .insert({ user_id: user.id, name_he: categoryName, icon: categoryIcon ?? null })
+        .select('id, name_he, icon')
         .single()
       if (created) {
         categoryMap.set(created.name_he, created.id)
+        if (created.icon) iconMap.set(created.name_he, created.icon)
         categoryId = created.id
+        categoryIcon = created.icon ?? categoryIcon
       }
+    } else if (categoryIcon && !iconMap.has(categoryName)) {
+      // Existing category has no icon — update it
+      await supabase
+        .from('categories')
+        .update({ icon: categoryIcon })
+        .eq('id', categoryId)
+        .eq('user_id', user.id)
+      iconMap.set(categoryName, categoryIcon)
+    } else {
+      categoryIcon = iconMap.get(categoryName) ?? null
     }
 
     if (!categoryId) {
@@ -101,7 +120,7 @@ export async function POST(req: NextRequest) {
       .eq('id', transactionId)
       .eq('user_id', user.id)
 
-    return Response.json({ categorized: 1, categoryId })
+    return Response.json({ categorized: 1, categoryId, categoryName, categoryIcon, isNew })
   }
 
   // ── Batch mode ───────────────────────────────────────────────────────────
@@ -131,31 +150,42 @@ export async function POST(req: NextRequest) {
     const prompt =
       `קטגוריות קיימות: ${Array.from(categoryMap.keys()).join(', ')}\n\n` +
       `סווג כל עסקה לקטגוריה המתאימה. אם אף קטגוריה קיימת לא מתאימה, המצא שם קטגוריה חדש בעברית (קצר, 1-3 מילים).\n` +
-      `החזר JSON בלבד בפורמט: {"0":"שם קטגוריה","1":"שם קטגוריה",...}\n\n` +
+      `החזר JSON בלבד בפורמט: {"0":{"name":"שם קטגוריה","icon":"🔤"},"1":{"name":"שם קטגוריה","icon":"🔤"},...}\n` +
+      `ה-icon יהיה אמוג'י אחד המתאים לקטגוריה.\n\n` +
       `עסקאות:\n${descriptions}`
 
-    let result: Record<string, string> = {}
+    let result: Record<string, { name: string; icon: string }> = {}
     try {
       const { text } = await generateText({ model: MODEL, prompt })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, string>
+      if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, { name: string; icon: string }>
     } catch (err) {
       console.error('[categorize] batch AI error:', err)
       continue
     }
 
     // Create any new categories the AI suggested
-    for (const categoryName of Object.values(result)) {
-      if (!categoryName || categoryMap.has(categoryName)) continue
+    for (const { name: categoryName, icon: categoryIcon } of Object.values(result)) {
+      if (!categoryName) continue
+      if (categoryMap.has(categoryName)) {
+        // Update icon if missing
+        if (categoryIcon && !iconMap.has(categoryName)) {
+          const id = categoryMap.get(categoryName)!
+          await supabase.from('categories').update({ icon: categoryIcon }).eq('id', id).eq('user_id', user.id)
+          iconMap.set(categoryName, categoryIcon)
+        }
+        continue
+      }
 
       const { data: created } = await supabase
         .from('categories')
-        .insert({ user_id: user.id, name_he: categoryName })
-        .select('id, name_he')
+        .insert({ user_id: user.id, name_he: categoryName, icon: categoryIcon ?? null })
+        .select('id, name_he, icon')
         .single()
 
       if (created) {
         categoryMap.set(created.name_he, created.id)
+        if (created.icon) iconMap.set(created.name_he, created.icon)
         totalNewCategories++
       }
     }
@@ -163,7 +193,8 @@ export async function POST(req: NextRequest) {
     // Apply categorizations
     const updates = batch
       .map((t, idx) => {
-        const categoryName = result[String(idx)]
+        const entry = result[String(idx)]
+        const categoryName = entry?.name
         const categoryId = categoryName ? categoryMap.get(categoryName) : undefined
         return categoryId ? { id: t.id, category_id: categoryId } : null
       })
