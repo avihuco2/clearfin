@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
 
     let result: Record<string, string> = {}
     try {
-      const { text } = await generateText({ model: MODEL, prompt, maxTokens: 1024 })
+      const { text } = await generateText({ model: MODEL, prompt })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, string>
     } catch (err) {
