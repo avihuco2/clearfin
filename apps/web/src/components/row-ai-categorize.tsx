@@ -26,7 +26,7 @@ export function RowAiCategorize({ transactionId, onCategorized }: RowAiCategoriz
       if (!res.ok) throw new Error('categorize failed')
       const data = (await res.json()) as { categoryId?: string }
       if (data.categoryId) {
-        onCategorized(data.categoryId)
+        onCategorized?.(data.categoryId)
       }
       setState('idle')
       router.refresh()
