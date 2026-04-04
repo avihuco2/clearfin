@@ -5,6 +5,8 @@ import { createContext, useContext, useState } from 'react'
 export interface CategoryOption {
   id: string
   name_he: string
+  icon?: string | null
+  color?: string | null
 }
 
 interface CategoriesContextValue {

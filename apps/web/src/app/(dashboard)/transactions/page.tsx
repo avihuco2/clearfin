@@ -54,6 +54,8 @@ interface CategoryRaw {
   id: string
   name_he: string | null
   name_en: string | null
+  icon: string | null
+  color: string | null
 }
 
 export default async function TransactionsPage({
@@ -75,7 +77,7 @@ export default async function TransactionsPage({
       .returns<BankAccount[]>(),
     supabase
       .from('categories')
-      .select('id, name_he, name_en')
+      .select('id, name_he, name_en, icon, color')
       .order('name_he', { ascending: true })
       .returns<CategoryRaw[]>(),
     supabase
@@ -109,6 +111,8 @@ export default async function TransactionsPage({
   const categories: CategoryOption[] = categoriesRaw.map((c) => ({
     id: c.id,
     name_he: c.name_he ?? c.name_en ?? c.id,
+    icon: c.icon,
+    color: c.color,
   }))
 
   // Build lookup maps

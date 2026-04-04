@@ -89,7 +89,7 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
       if (!res.ok) throw new Error('create failed')
 
       const created = (await res.json()) as { id: string; name_he: string }
-      const newCat = { id: created.id, name_he: created.name_he }
+      const newCat = { id: created.id, name_he: created.name_he, icon: null, color: null }
 
       addCategory(newCat)
       setSelected(created.id)
@@ -139,6 +139,21 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
 
   return (
     <div className="flex items-center gap-1.5">
+      {selectedCategory?.icon ? (
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] leading-none"
+          style={{ background: selectedCategory.color ? `${selectedCategory.color}26` : 'rgba(255,255,255,0.08)' }}
+          aria-hidden="true"
+        >
+          {selectedCategory.icon}
+        </span>
+      ) : selected && selectedCategory?.color ? (
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ background: selectedCategory.color }}
+          aria-hidden="true"
+        />
+      ) : null}
       <select
         value={selected ?? ''}
         onChange={handleChange}
