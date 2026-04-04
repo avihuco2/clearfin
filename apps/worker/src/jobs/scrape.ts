@@ -258,10 +258,17 @@ export async function processScrapeJob(
       .map((txn) => {
         const chargedAmount = txn.chargedAmount || txn.originalAmount || 0
         const originalAmount = txn.originalAmount || txn.chargedAmount || 0
+        // When the bank provides no identifier, generate a stable synthetic one
+        // from the fields that uniquely identify the transaction so that
+        // re-scraping the same data never creates duplicates.
+        const rawId = txn.identifier?.toString() ?? null
+        const externalId =
+          rawId ??
+          `synthetic:${toIsraeliDate(txn.date)}:${txn.description}:${chargedAmount}`
         return {
           user_id: userId,
           bank_account_id: bankAccountId,
-          external_id: txn.identifier?.toString() ?? null,
+          external_id: externalId,
           date: toIsraeliDate(txn.date),
           processed_date: txn.processedDate ? toIsraeliDate(txn.processedDate) : null,
           description: txn.description,
