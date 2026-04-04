@@ -260,12 +260,7 @@ export default async function TransactionsPage({
                               transactionId={tx.id}
                               currentCategoryId={tx.category_id}
                             />
-                            <RowAiCategorize
-                              transactionId={tx.id}
-                              onCategorized={() => {
-                                /* router.refresh() is called inside RowAiCategorize */
-                              }}
-                            />
+                            <RowAiCategorize transactionId={tx.id} />
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 interface RowAiCategorizeProps {
   transactionId: string
-  onCategorized: (categoryId: string) => void
+  onCategorized?: (categoryId: string) => void
 }
 
 type ButtonState = 'idle' | 'loading' | 'error'
