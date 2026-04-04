@@ -11,7 +11,7 @@ const TriggerSchema = z.object({
 })
 
 const BATCH_SIZE = 50
-const MODEL = google('gemini-2.0-flash')
+const MODEL = google('gemini-2.0-flash-001')
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient()
