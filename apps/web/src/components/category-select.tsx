@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { API_ROUTES } from '@/lib/api-routes'
 
 export interface CategoryOption {
@@ -30,6 +31,12 @@ export function CategorySelect({
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+
+  // Sync when server re-renders with updated category list (e.g. after router.refresh())
+  useEffect(() => {
+    setCategories(initialCategories)
+  }, [initialCategories])
 
   useEffect(() => {
     if (showNewInput) inputRef.current?.focus()
@@ -95,6 +102,8 @@ export function CategorySelect({
       setNewName('')
 
       await saveCategory(created.id)
+      // Refresh server data so all other CategorySelect instances get the new category
+      router.refresh()
     } catch {
       setSaveState('error')
       setTimeout(() => setSaveState('idle'), 3000)
