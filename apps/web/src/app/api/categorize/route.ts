@@ -8,35 +8,24 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const TriggerSchema = z.object({
   bankAccountId: z.string().uuid().optional(),
   since: z.string().date().optional(),
+  transactionId: z.string().uuid().optional(),
 })
 
 const BATCH_SIZE = 50
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
   if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const parsed = TriggerSchema.safeParse(body)
   if (!parsed.success) return Response.json({ error: parsed.error.flatten() }, { status: 400 })
 
-  const { bankAccountId, since } = parsed.data
-
-  // Fetch uncategorized transactions
-  let query = supabase
-    .from('transactions')
-    .select('id, description, memo')
-    .is('category_id', null)
-    .eq('user_id', user.id)
-    .limit(200)
-
-  if (bankAccountId) query = query.eq('bank_account_id', bankAccountId)
-  if (since) query = query.gte('date', since)
-
-  const { data: transactions, error: txError } = await query
-  if (txError) return Response.json({ error: 'Failed to fetch transactions' }, { status: 500 })
-  if (!transactions?.length) return Response.json({ categorized: 0, newCategories: 0 })
+  const { bankAccountId, since, transactionId } = parsed.data
 
   // Fetch all available categories (system + user's own)
   const { data: categoriesData } = await supabase
@@ -48,6 +37,89 @@ export async function POST(req: NextRequest) {
   const categoryMap = new Map<string, string>(
     (categoriesData ?? []).map((c) => [c.name_he, c.id]),
   )
+
+  // ── Single-transaction mode ──────────────────────────────────────────────
+  if (transactionId) {
+    const { data: tx, error: txError } = await supabase
+      .from('transactions')
+      .select('id, description, memo')
+      .eq('id', transactionId)
+      .eq('user_id', user.id)
+      .single()
+
+    if (txError || !tx) {
+      return Response.json({ error: 'עסקה לא נמצאה' }, { status: 404 })
+    }
+
+    const description = `${tx.description}${tx.memo ? ` (${tx.memo})` : ''}`
+    const prompt =
+      `קטגוריות קיימות: ${Array.from(categoryMap.keys()).join(', ')}\n\n` +
+      `סווג את העסקה הבאה לקטגוריה המתאימה. אם אף קטגוריה קיימת לא מתאימה, המצא שם קטגוריה חדש בעברית (קצר, 1-3 מילים).\n` +
+      `החזר JSON בלבד בפורמט: {"category":"שם קטגוריה"}\n\n` +
+      `עסקה: ${description}`
+
+    let categoryName: string | null = null
+    try {
+      const message = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 256,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text = message.content[0]?.type === 'text' ? message.content[0].text : ''
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as { category?: string }
+        categoryName = parsed.category ?? null
+      }
+    } catch {
+      return Response.json({ error: 'שגיאה בסיווג AI' }, { status: 500 })
+    }
+
+    if (!categoryName) {
+      return Response.json({ error: 'לא הוחזרה קטגוריה' }, { status: 500 })
+    }
+
+    // Create new category if needed
+    let categoryId = categoryMap.get(categoryName)
+    if (!categoryId) {
+      const { data: created } = await supabase
+        .from('categories')
+        .insert({ user_id: user.id, name_he: categoryName })
+        .select('id, name_he')
+        .single()
+      if (created) {
+        categoryMap.set(created.name_he, created.id)
+        categoryId = created.id
+      }
+    }
+
+    if (!categoryId) {
+      return Response.json({ error: 'שגיאה ביצירת קטגוריה' }, { status: 500 })
+    }
+
+    await supabase
+      .from('transactions')
+      .update({ category_id: categoryId })
+      .eq('id', transactionId)
+      .eq('user_id', user.id)
+
+    return Response.json({ categorized: 1, categoryId })
+  }
+
+  // ── Batch mode ───────────────────────────────────────────────────────────
+  let query = supabase
+    .from('transactions')
+    .select('id, description, memo')
+    .is('category_id', null)
+    .eq('user_id', user.id)
+    .limit(200)
+
+  if (bankAccountId) query = query.eq('bank_account_id', bankAccountId)
+  if (since) query = query.gte('date', since)
+
+  const { data: transactions, error: txError } = await query
+  if (txError) return Response.json({ error: 'שגיאה בטעינת עסקאות' }, { status: 500 })
+  if (!transactions?.length) return Response.json({ categorized: 0, newCategories: 0 })
 
   let totalCategorized = 0
   let totalNewCategories = 0

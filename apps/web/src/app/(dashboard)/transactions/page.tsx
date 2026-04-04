@@ -6,7 +6,9 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { CategorySelect } from '@/components/category-select'
 import { CategorizeButton } from '@/components/categorize-button'
-import type { CategoryOption } from '@/components/category-select'
+import { RowAiCategorize } from '@/components/row-ai-categorize'
+import { CategoriesProvider } from '@/lib/categories-context'
+import type { CategoryOption } from '@/lib/categories-context'
 
 const PAGE_SIZE = 50
 
@@ -51,7 +53,7 @@ const COMPANY_LABELS: Record<string, string> = {
 interface CategoryRaw {
   id: string
   name_he: string | null
-  name: string | null
+  name_en: string | null
 }
 
 export default async function TransactionsPage({
@@ -73,7 +75,7 @@ export default async function TransactionsPage({
       .returns<BankAccount[]>(),
     supabase
       .from('categories')
-      .select('id, name_he, name')
+      .select('id, name_he, name_en')
       .order('name_he', { ascending: true })
       .returns<CategoryRaw[]>(),
     supabase
@@ -103,20 +105,19 @@ export default async function TransactionsPage({
   const categoriesRaw = categoriesResult.data ?? []
   const uncategorizedCount = uncatResult.count ?? 0
 
-  // Normalise categories — prefer name_he, fall back to name
+  // Normalise categories — prefer name_he, fall back to name_en
   const categories: CategoryOption[] = categoriesRaw.map((c) => ({
     id: c.id,
-    name_he: c.name_he ?? c.name ?? c.id,
+    name_he: c.name_he ?? c.name_en ?? c.id,
   }))
 
   // Build lookup maps
   const accountMap = new Map<string, BankAccount>(accounts.map((a) => [a.id, a]))
-  const categoryMap = new Map<string, CategoryOption>(categories.map((c) => [c.id, c]))
 
   // Filter-bar-compatible categories (id + name)
   const filterCategories = categoriesRaw.map((c) => ({
     id: c.id,
-    name: c.name_he ?? c.name ?? c.id,
+    name: c.name_he ?? c.name_en ?? c.id,
   }))
 
   const totalCount = count ?? 0
@@ -148,161 +149,172 @@ export default async function TransactionsPage({
         <CategorizeButton uncategorizedCount={uncategorizedCount} />
       </div>
 
-      {/* Filter controls — client component wrapped in Suspense for streaming */}
-      <Suspense fallback={<div className="h-24 animate-pulse rounded-xl bg-gray-100" />}>
-        <TransactionFilters accounts={accounts} categories={filterCategories} />
-      </Suspense>
+      <CategoriesProvider initial={categories}>
+        {/* Filter controls — client component wrapped in Suspense for streaming */}
+        <Suspense fallback={<div className="h-24 animate-pulse rounded-xl bg-gray-100" />}>
+          <TransactionFilters accounts={accounts} categories={filterCategories} />
+        </Suspense>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-        >
-          שגיאה בטעינת העסקאות. נסה לרענן את הדף.
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!error && transactions?.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
-          <p className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">אין עסקאות</p>
-          <p className="mb-4 text-sm text-[var(--color-muted-foreground)]">
-            {sp.accountId || sp.categoryId || sp.from || sp.to
-              ? 'לא נמצאו עסקאות עבור הסינון הנוכחי'
-              : 'אין עסקאות בחשבונות המחוברים עדיין'}
-          </p>
-          {!sp.accountId && !sp.categoryId && !sp.from && !sp.to && (
-            <Link
-              href="/accounts"
-              className="text-sm font-medium text-[var(--color-primary)] underline-offset-2 hover:underline"
-            >
-              חבר חשבון בנק
-            </Link>
-          )}
-        </div>
-      )}
-
-      {/* Transactions table */}
-      {transactions && transactions.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm" aria-label="טבלת עסקאות">
-              <thead>
-                <tr className="border-b border-[var(--color-border)] bg-[var(--color-muted)]">
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    תאריך
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    תיאור
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-end text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    סכום
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    קטגוריה
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    מידע נוסף
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
-                  >
-                    חשבון
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--color-border)]">
-                {transactions.map((tx) => {
-                  const account = accountMap.get(tx.bank_account_id)
-                  const isDebit = tx.charged_amount < 0
-
-                  return (
-                    <tr
-                      key={tx.id}
-                      className="transition-colors hover:bg-[var(--color-muted)]/50"
-                    >
-                      <td className="whitespace-nowrap px-4 py-3.5 text-[var(--color-muted-foreground)]">
-                        {formatDate(tx.date)}
-                      </td>
-                      <td className="px-4 py-3.5 text-[var(--color-foreground)]">
-                        <span dir="auto">{tx.description}</span>
-                      </td>
-                      <td
-                        className={[
-                          'whitespace-nowrap px-4 py-3.5 text-end font-medium tabular-nums',
-                          isDebit ? 'text-red-600' : 'text-green-600',
-                        ].join(' ')}
-                      >
-                        {formatCurrency(tx.charged_amount)}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <CategorySelect
-                          transactionId={tx.id}
-                          currentCategoryId={tx.category_id}
-                          categories={categories}
-                        />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
-                        {tx.sub_account ? `****${tx.sub_account.slice(-4)}` : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
-                        {account
-                          ? (account.display_name ?? COMPANY_LABELS[account.company_id] ?? account.company_id)
-                          : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        {/* Error state */}
+        {error && (
+          <div
+            role="alert"
+            className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+          >
+            שגיאה בטעינת העסקאות. נסה לרענן את הדף.
           </div>
+        )}
 
-          {/* Pagination */}
-          {(hasPrev || hasNext) && (
-            <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3">
-              <p className="text-xs text-[var(--color-muted-foreground)]">
-                מציג {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} מתוך{' '}
-                {totalCount.toLocaleString('he-IL')}
-              </p>
-              <div className="flex gap-2">
-                {hasPrev && (
-                  <Link
-                    href={buildPageUrl(offset - PAGE_SIZE)}
-                    className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
-                  >
-                    הקודם
-                  </Link>
-                )}
-                {hasNext && (
-                  <Link
-                    href={buildPageUrl(offset + PAGE_SIZE)}
-                    className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
-                  >
-                    הבא
-                  </Link>
-                )}
-              </div>
+        {/* Empty state */}
+        {!error && transactions?.length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
+            <p className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">אין עסקאות</p>
+            <p className="mb-4 text-sm text-[var(--color-muted-foreground)]">
+              {sp.accountId || sp.categoryId || sp.from || sp.to
+                ? 'לא נמצאו עסקאות עבור הסינון הנוכחי'
+                : 'אין עסקאות בחשבונות המחוברים עדיין'}
+            </p>
+            {!sp.accountId && !sp.categoryId && !sp.from && !sp.to && (
+              <Link
+                href="/accounts"
+                className="text-sm font-medium text-[var(--color-primary)] underline-offset-2 hover:underline"
+              >
+                חבר חשבון בנק
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Transactions table */}
+        {transactions && transactions.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm" aria-label="טבלת עסקאות">
+                <thead>
+                  <tr className="border-b border-[var(--color-border)] bg-[var(--color-muted)]">
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      תאריך
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      תיאור
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-end text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      סכום
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      קטגוריה
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      מידע נוסף
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                    >
+                      חשבון
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border)]">
+                  {transactions.map((tx) => {
+                    const account = accountMap.get(tx.bank_account_id)
+                    const isDebit = tx.charged_amount < 0
+
+                    return (
+                      <tr
+                        key={tx.id}
+                        className="transition-colors hover:bg-[var(--color-muted)]/50"
+                      >
+                        <td className="whitespace-nowrap px-4 py-3.5 text-[var(--color-muted-foreground)]">
+                          {formatDate(tx.date)}
+                        </td>
+                        <td className="px-4 py-3.5 text-[var(--color-foreground)]">
+                          <span dir="auto">{tx.description}</span>
+                        </td>
+                        <td
+                          className={[
+                            'whitespace-nowrap px-4 py-3.5 text-end font-medium tabular-nums',
+                            isDebit ? 'text-red-600' : 'text-green-600',
+                          ].join(' ')}
+                        >
+                          {formatCurrency(tx.charged_amount)}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-1">
+                            <CategorySelect
+                              transactionId={tx.id}
+                              currentCategoryId={tx.category_id}
+                            />
+                            <RowAiCategorize
+                              transactionId={tx.id}
+                              onCategorized={() => {
+                                /* router.refresh() is called inside RowAiCategorize */
+                              }}
+                            />
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
+                          {tx.sub_account ? `****${tx.sub_account.slice(-4)}` : '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3.5 text-sm text-[var(--color-muted-foreground)]">
+                          {account
+                            ? (account.display_name ??
+                              COMPANY_LABELS[account.company_id] ??
+                              account.company_id)
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Pagination */}
+            {(hasPrev || hasNext) && (
+              <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3">
+                <p className="text-xs text-[var(--color-muted-foreground)]">
+                  מציג {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} מתוך{' '}
+                  {totalCount.toLocaleString('he-IL')}
+                </p>
+                <div className="flex gap-2">
+                  {hasPrev && (
+                    <Link
+                      href={buildPageUrl(offset - PAGE_SIZE)}
+                      className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
+                    >
+                      הקודם
+                    </Link>
+                  )}
+                  {hasNext && (
+                    <Link
+                      href={buildPageUrl(offset + PAGE_SIZE)}
+                      className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
+                    >
+                      הבא
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CategoriesProvider>
     </div>
   )
 }

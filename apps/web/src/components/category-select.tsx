@@ -3,28 +3,22 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { API_ROUTES } from '@/lib/api-routes'
+import { useCategories } from '@/lib/categories-context'
 
-export interface CategoryOption {
-  id: string
-  name_he: string
-}
+// Re-export so callers that import CategoryOption from here still work
+export type { CategoryOption } from '@/lib/categories-context'
 
 interface CategorySelectProps {
   transactionId: string
   currentCategoryId: string | null
-  categories: CategoryOption[]
 }
 
 type SaveState = 'idle' | 'saving' | 'success' | 'error'
 
 const NEW_CATEGORY_VALUE = '__new__'
 
-export function CategorySelect({
-  transactionId,
-  currentCategoryId,
-  categories: initialCategories,
-}: CategorySelectProps) {
-  const [categories, setCategories] = useState<CategoryOption[]>(initialCategories)
+export function CategorySelect({ transactionId, currentCategoryId }: CategorySelectProps) {
+  const { categories, addCategory } = useCategories()
   const [selected, setSelected] = useState<string | null>(currentCategoryId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [showNewInput, setShowNewInput] = useState(false)
@@ -33,10 +27,10 @@ export function CategorySelect({
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
-  // Sync when server re-renders with updated category list (e.g. after router.refresh())
+  // Keep selected in sync when server re-renders with a new currentCategoryId
   useEffect(() => {
-    setCategories(initialCategories)
-  }, [initialCategories])
+    setSelected(currentCategoryId)
+  }, [currentCategoryId])
 
   useEffect(() => {
     if (showNewInput) inputRef.current?.focus()
@@ -50,7 +44,7 @@ export function CategorySelect({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoryId }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) throw new Error('save failed')
       setSaveState('success')
       setTimeout(() => setSaveState('idle'), 1500)
     } catch {
@@ -91,18 +85,19 @@ export function CategorySelect({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nameHe: trimmed }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) throw new Error('create failed')
 
-      const created = await res.json() as { id: string; name_he: string }
-      const newCat: CategoryOption = { id: created.id, name_he: created.name_he }
+      const created = (await res.json()) as { id: string; name_he: string }
+      const newCat = { id: created.id, name_he: created.name_he }
 
-      setCategories((prev) => [...prev, newCat].sort((a, b) => a.name_he.localeCompare(b.name_he, 'he')))
+      // Update shared context so all other CategorySelect instances see it immediately
+      addCategory(newCat)
       setSelected(created.id)
       setShowNewInput(false)
       setNewName('')
 
       await saveCategory(created.id)
-      // Refresh server data so all other CategorySelect instances get the new category
+      // Refresh server data so other sessions / future renders are up to date
       router.refresh()
     } catch {
       setSaveState('error')
@@ -135,7 +130,10 @@ export function CategorySelect({
           </button>
           <button
             type="button"
-            onClick={() => { setShowNewInput(false); setNewName('') }}
+            onClick={() => {
+              setShowNewInput(false)
+              setNewName('')
+            }}
             className="rounded px-1.5 py-1 text-xs text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
           >
             ✕
@@ -182,9 +180,7 @@ export function CategorySelect({
           <polyline points="20 6 9 17 4 12" />
         </svg>
       )}
-      {saveState === 'error' && (
-        <span className="text-xs text-red-600">שגיאה</span>
-      )}
+      {saveState === 'error' && <span className="text-xs text-red-600">שגיאה</span>}
     </div>
   )
 }

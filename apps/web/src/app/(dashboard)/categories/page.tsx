@@ -2,13 +2,14 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { CategoryManager } from '@/components/category-manager'
 
-interface Category {
+interface CategoryWithCount {
   id: string
   name_he: string
   name_en: string | null
   icon: string | null
   color: string | null
   user_id: string | null
+  transactions: { count: number }[]
 }
 
 export default async function CategoriesPage() {
@@ -16,12 +17,18 @@ export default async function CategoriesPage() {
 
   const { data: categories } = await supabase
     .from('categories')
-    .select('id, name_he, name_en, icon, color, user_id')
+    .select('id, name_he, name_en, icon, color, user_id, transactions(count)')
     .order('name_he', { ascending: true })
-    .returns<Category[]>()
+    .returns<CategoryWithCount[]>()
 
-  const system = (categories ?? []).filter((c) => c.user_id === null)
-  const user = (categories ?? []).filter((c) => c.user_id !== null)
+  // Flatten the nested count into a plain number
+  const enriched = (categories ?? []).map((c) => ({
+    ...c,
+    transactionCount: c.transactions?.[0]?.count ?? 0,
+  }))
+
+  const system = enriched.filter((c) => c.user_id === null)
+  const user = enriched.filter((c) => c.user_id !== null)
 
   return (
     <div className="space-y-6">

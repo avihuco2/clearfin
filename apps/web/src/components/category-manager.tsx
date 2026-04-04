@@ -10,6 +10,7 @@ interface Category {
   icon: string | null
   color: string | null
   user_id: string | null
+  transactionCount?: number
 }
 
 interface Props {
@@ -45,8 +46,12 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
         body: JSON.stringify({ nameHe: nameHe.trim(), icon: icon.trim() || undefined, color }),
       })
       if (!res.ok) throw new Error()
-      const created = await res.json() as Category
-      setUserCats((prev) => [...prev, created].sort((a, b) => a.name_he.localeCompare(b.name_he, 'he')))
+      const created = (await res.json()) as Category
+      setUserCats((prev) =>
+        [...prev, { ...created, transactionCount: 0 }].sort((a, b) =>
+          a.name_he.localeCompare(b.name_he, 'he'),
+        ),
+      )
       setNameHe('')
       setIcon('')
       setColor('#3b82f6')
@@ -58,8 +63,12 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
     }
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`למחוק את הקטגוריה "${name}"?`)) return
+  async function handleDelete(id: string, name: string, txCount: number) {
+    const warningLine =
+      txCount > 0
+        ? `\n\n${txCount.toLocaleString('he-IL')} עסקאות ישארו ללא קטגוריה.`
+        : ''
+    if (!confirm(`למחוק את הקטגוריה "${name}"?${warningLine}`)) return
     setDeletingId(id)
     try {
       const res = await fetch(`/api/categories/${id}`, { method: 'DELETE' })
@@ -80,9 +89,11 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
     <div className="space-y-6">
       {/* Add new category form */}
       <div className="glass-card p-5">
-        <h2 className="mb-4 text-sm font-semibold text-[var(--color-foreground)]">הוסף קטגוריה חדשה</h2>
+        <h2 className="mb-4 text-sm font-semibold text-[var(--color-foreground)]">
+          הוסף קטגוריה חדשה
+        </h2>
         <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[140px] space-y-1">
+          <div className="min-w-[140px] flex-1 space-y-1">
             <label className="text-xs text-[var(--color-muted-foreground)]">שם בעברית</label>
             <input
               type="text"
@@ -133,7 +144,11 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
             {saving ? '...' : '+ הוסף'}
           </button>
         </form>
-        {error && <p className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+        {error && (
+          <p className="mt-2 text-xs" style={{ color: 'var(--color-danger)' }}>
+            {error}
+          </p>
+        )}
       </div>
 
       {/* User categories */}
@@ -141,7 +156,9 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
         <div className="glass-card p-5">
           <h2 className="mb-3 text-sm font-semibold text-[var(--color-foreground)]">
             קטגוריות אישיות
-            <span className="ms-2 text-xs font-normal text-[var(--color-muted-foreground)]">({userCats.length})</span>
+            <span className="ms-2 text-xs font-normal text-[var(--color-muted-foreground)]">
+              ({userCats.length})
+            </span>
           </h2>
           <ul className="space-y-2">
             {userCats.map((cat) => (
@@ -150,7 +167,7 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
                 cat={cat}
                 deletable
                 deleting={deletingId === cat.id}
-                onDelete={() => handleDelete(cat.id, cat.name_he)}
+                onDelete={() => handleDelete(cat.id, cat.name_he, cat.transactionCount ?? 0)}
               />
             ))}
           </ul>
@@ -161,7 +178,9 @@ export function CategoryManager({ systemCategories, userCategories }: Props) {
       <div className="glass-card p-5">
         <h2 className="mb-3 text-sm font-semibold text-[var(--color-foreground)]">
           קטגוריות מערכת
-          <span className="ms-2 text-xs font-normal text-[var(--color-muted-foreground)]">({systemCategories.length})</span>
+          <span className="ms-2 text-xs font-normal text-[var(--color-muted-foreground)]">
+            ({systemCategories.length})
+          </span>
         </h2>
         <ul className="space-y-2">
           {systemCategories.map((cat) => (
@@ -184,8 +203,10 @@ function CategoryRow({
   deleting: boolean
   onDelete: () => void
 }) {
+  const txCount = cat.transactionCount ?? 0
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 hover:bg-[var(--color-muted)]/40 transition-colors">
+    <li className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-muted)]/40">
       <div className="flex items-center gap-3">
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base"
@@ -200,19 +221,35 @@ function CategoryRow({
           )}
         </div>
       </div>
-      {deletable ? (
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleting}
-          className="rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 transition-colors"
-          style={{ color: 'var(--color-danger)', background: 'var(--color-danger-dim)' }}
-        >
-          {deleting ? '...' : 'מחק'}
-        </button>
-      ) : (
-        <span className="text-xs text-[var(--color-muted-foreground)]">מערכת</span>
-      )}
+
+      <div className="flex items-center gap-3">
+        {/* Transaction count badge */}
+        {txCount > 0 && (
+          <span
+            className="rounded-full px-2 py-0.5 text-xs font-medium"
+            style={{
+              background: cat.color ? `${cat.color}22` : 'var(--color-muted)',
+              color: cat.color ?? 'var(--color-muted-foreground)',
+            }}
+          >
+            {txCount.toLocaleString('he-IL')} עסקאות
+          </span>
+        )}
+
+        {deletable ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40"
+            style={{ color: 'var(--color-danger)', background: 'var(--color-danger-dim)' }}
+          >
+            {deleting ? '...' : 'מחק'}
+          </button>
+        ) : (
+          <span className="text-xs text-[var(--color-muted-foreground)]">מערכת</span>
+        )}
+      </div>
     </li>
   )
 }
