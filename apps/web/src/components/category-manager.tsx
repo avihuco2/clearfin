@@ -219,11 +219,11 @@ function CategoryCard({ cat, onUpdated, onDeleted }: CategoryCardProps) {
           מערכת
         </span>
       ) : (
-        <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="mt-1 flex items-center justify-between">
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-white/10 hover:text-[var(--color-foreground)]"
+            className="rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-white/10 hover:text-[var(--color-foreground)] opacity-0 group-hover:opacity-100"
             title="עריכה"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -239,7 +239,7 @@ function CategoryCard({ cat, onUpdated, onDeleted }: CategoryCardProps) {
             style={{ color: 'var(--color-danger)' }}
             title="מחיקה"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
               <path d="M10 11v6M14 11v6" />
