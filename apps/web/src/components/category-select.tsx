@@ -139,45 +139,28 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
 
   return (
     <div className="flex items-center gap-1.5">
-      <div className="relative">
-        <select
-          value={selected ?? ''}
-          onChange={handleChange}
-          disabled={saveState === 'saving'}
-          dir="rtl"
-          aria-label="בחר קטגוריה"
-          className={[
-            'h-7 max-w-[160px] cursor-pointer appearance-none rounded-full pe-5 ps-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-            selected
-              ? 'border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-              : 'border border-dashed border-[var(--color-border)] bg-transparent text-[var(--color-muted-foreground)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-foreground)]',
-          ].join(' ')}
-        >
-          <option value="">ללא קטגוריה</option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.name_he}
-            </option>
-          ))}
-          <option disabled>──────────</option>
-          <option value={NEW_CATEGORY_VALUE}>+ הוסף קטגוריה</option>
-        </select>
-        {/* Chevron */}
-        <svg
-          className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 opacity-50"
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </div>
+      <select
+        value={selected ?? ''}
+        onChange={handleChange}
+        disabled={saveState === 'saving'}
+        dir="rtl"
+        aria-label="בחר קטגוריה"
+        className={[
+          'h-7 max-w-[160px] cursor-pointer rounded-full px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+          selected
+            ? 'border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+            : 'border border-dashed border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-foreground)]',
+        ].join(' ')}
+      >
+        <option value="">ללא קטגוריה</option>
+        {categories.map((cat) => (
+          <option key={cat.id} value={cat.id}>
+            {cat.name_he}
+          </option>
+        ))}
+        <option disabled>──────────</option>
+        <option value={NEW_CATEGORY_VALUE}>+ הוסף קטגוריה</option>
+      </select>
 
       {saveState === 'saving' && (
         <span
