@@ -254,24 +254,30 @@ export async function processScrapeJob(
 
     if (acc.txns.length === 0) continue
 
-    const rows = acc.txns.map((txn) => ({
-      user_id: userId,
-      bank_account_id: bankAccountId,
-      external_id: txn.identifier?.toString() ?? null,
-      date: toIsraeliDate(txn.date),
-      processed_date: txn.processedDate ? toIsraeliDate(txn.processedDate) : null,
-      description: txn.description,
-      memo: txn.memo ?? null,
-      original_amount: txn.originalAmount ?? txn.chargedAmount ?? 0,
-      original_currency: txn.originalCurrency,
-      charged_amount: txn.chargedAmount ?? txn.originalAmount ?? 0,
-      charged_currency: txn.chargedCurrency ?? 'ILS',
-      type: txn.type,
-      status: txn.status,
-      installment_number: txn.installments?.number ?? null,
-      installment_total: txn.installments?.total ?? null,
-      sub_account: acc.accountNumber ?? null,
-    }))
+    const rows = acc.txns
+      .map((txn) => {
+        const chargedAmount = txn.chargedAmount || txn.originalAmount || 0
+        const originalAmount = txn.originalAmount || txn.chargedAmount || 0
+        return {
+          user_id: userId,
+          bank_account_id: bankAccountId,
+          external_id: txn.identifier?.toString() ?? null,
+          date: toIsraeliDate(txn.date),
+          processed_date: txn.processedDate ? toIsraeliDate(txn.processedDate) : null,
+          description: txn.description,
+          memo: txn.memo ?? null,
+          original_amount: originalAmount,
+          original_currency: txn.originalCurrency,
+          charged_amount: chargedAmount,
+          charged_currency: txn.chargedCurrency ?? 'ILS',
+          type: txn.type,
+          status: txn.status,
+          installment_number: txn.installments?.number ?? null,
+          installment_total: txn.installments?.total ?? null,
+          sub_account: acc.accountNumber ?? null,
+        }
+      })
+      .filter((row) => row.charged_amount !== 0)
 
     const { count, error: upsertError } = await supabase
       .from('transactions')
