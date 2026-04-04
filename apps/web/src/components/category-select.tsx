@@ -145,7 +145,8 @@ export function CategorySelect({ transactionId, currentCategoryId }: CategorySel
         disabled={saveState === 'saving'}
         dir="rtl"
         aria-label="בחר קטגוריה"
-        className="h-7 w-full min-w-[120px] max-w-[200px] cursor-pointer rounded-full border border-gray-300 bg-white px-2 text-xs font-medium text-gray-800 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ colorScheme: 'dark', color: '#f0f4ff', background: 'rgba(16,24,40,0.8)' }}
+        className="h-7 w-full min-w-[120px] max-w-[200px] cursor-pointer rounded-full border border-white/20 px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
         <option value="">ללא קטגוריה</option>
         {categories.map((cat) => (
