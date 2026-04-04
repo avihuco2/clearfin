@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.66",
+    "@ai-sdk/google": "^3.0.58",
     "@anthropic-ai/sdk": "^0.39.0",
     "@clearfin/crypto": "*",
     "@radix-ui/react-direction": "^1.1.0",
