@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { google } from '@ai-sdk/google'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText } from 'ai'
 import { createServerClient } from '@/lib/supabase/server'
 
@@ -11,7 +11,8 @@ const TriggerSchema = z.object({
 })
 
 const BATCH_SIZE = 50
-const MODEL = google('gemini-1.5-flash')
+const googleAI = createGoogleGenerativeAI({ apiVersion: 'v1' })
+const MODEL = googleAI('gemini-1.5-flash')
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient()
