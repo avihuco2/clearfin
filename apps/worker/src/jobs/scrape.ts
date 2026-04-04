@@ -77,6 +77,12 @@ async function waitForOtp(bankAccountId: string): Promise<string> {
 //   floored at 3 months ago
 // ---------------------------------------------------------------------------
 
+// Extract YYYY-MM-DD in Israeli local time (Asia/Jerusalem = UTC+2/+3).
+// txn.date from Max is midnight local time; taking the raw UTC slice loses a day.
+function toIsraeliDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('sv', { timeZone: 'Asia/Jerusalem' })
+}
+
 function resolveStartDate(lastScrapedAt: string | null, hasTransactions: boolean): Date {
   const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
 
@@ -252,13 +258,13 @@ export async function processScrapeJob(
       user_id: userId,
       bank_account_id: bankAccountId,
       external_id: txn.identifier?.toString() ?? null,
-      date: txn.date.slice(0, 10),
-      processed_date: txn.processedDate?.slice(0, 10) ?? null,
+      date: toIsraeliDate(txn.date),
+      processed_date: txn.processedDate ? toIsraeliDate(txn.processedDate) : null,
       description: txn.description,
       memo: txn.memo ?? null,
-      original_amount: txn.originalAmount,
+      original_amount: txn.originalAmount ?? txn.chargedAmount ?? 0,
       original_currency: txn.originalCurrency,
-      charged_amount: txn.chargedAmount,
+      charged_amount: txn.chargedAmount ?? txn.originalAmount ?? 0,
       charged_currency: txn.chargedCurrency ?? 'ILS',
       type: txn.type,
       status: txn.status,
