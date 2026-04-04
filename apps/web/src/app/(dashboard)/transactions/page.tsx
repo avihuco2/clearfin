@@ -212,7 +212,7 @@ export default async function TransactionsPage({
                     </th>
                     <th
                       scope="col"
-                      className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
+                      className="w-56 px-4 py-3 text-start text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]"
                     >
                       קטגוריה
                     </th>
