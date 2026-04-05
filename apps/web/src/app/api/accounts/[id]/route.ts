@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { createServerClient } from '@/lib/supabase/server'
 import { encrypt } from '@clearfin/crypto'
+import { logCredentialAccess } from '@/lib/audit-log'
 
 const ParamsSchema = z.object({ id: z.string().uuid() })
 
@@ -54,6 +55,15 @@ export async function PATCH(
   const { error } = await supabase.from('bank_accounts').update(updates).eq('id', id)
   if (error) return Response.json({ error: 'Failed to update account' }, { status: 500 })
 
+  if (bodyParsed.data.credentials) {
+    void logCredentialAccess({
+      userId: user.id,
+      bankAccountId: id,
+      action: 'updated',
+      triggeredBy: 'user',
+    })
+  }
+
   return Response.json({ ok: true })
 }
 
@@ -76,6 +86,13 @@ export async function DELETE(
 
   const { error } = await supabase.from('bank_accounts').delete().eq('id', id)
   if (error) return Response.json({ error: 'Failed to delete account' }, { status: 500 })
+
+  void logCredentialAccess({
+    userId: user.id,
+    bankAccountId: id,
+    action: 'deleted',
+    triggeredBy: 'user',
+  })
 
   return new Response(null, { status: 204 })
 }

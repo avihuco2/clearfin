@@ -5,6 +5,26 @@ import { decrypt } from '@clearfin/crypto'
 import { supabase } from '../lib/supabase.js'
 import { redis } from '../lib/redis.js'
 
+async function logCredentialAccess(
+  userId: string,
+  bankAccountId: string,
+  jobId: string,
+  triggeredBy: 'manual' | 'schedule',
+): Promise<void> {
+  try {
+    const { error } = await supabase.from('credential_access_logs').insert({
+      user_id: userId,
+      bank_account_id: bankAccountId,
+      action: 'decrypted',
+      triggered_by: triggeredBy,
+      scrape_job_id: jobId,
+    })
+    if (error) console.error('[audit] failed to write log:', error.message)
+  } catch (err) {
+    console.error('[audit] unexpected error:', err)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Job payload and result
 // ---------------------------------------------------------------------------
@@ -136,6 +156,9 @@ export async function processScrapeJob(
     account.credentials_tag as string,
     process.env['CREDENTIALS_ENCRYPTION_KEY'],
   )
+
+  // Audit: log every credential decryption — fire-and-forget
+  void logCredentialAccess(userId, bankAccountId, String(job.id), job.data.triggeredBy)
 
   // Inject the OTP retriever function into the credentials object.
   // For scrapers that use email + OTP the type requires otpCodeRetriever;

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { createServerClient } from '@/lib/supabase/server'
 import { encrypt } from '@clearfin/crypto'
+import { logCredentialAccess } from '@/lib/audit-log'
 
 const AddAccountSchema = z.object({
   companyId: z.string().min(1),
@@ -49,5 +50,15 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return Response.json({ error: 'Failed to save account' }, { status: 500 })
+
+  // Fire-and-forget audit log — never throws
+  void logCredentialAccess({
+    userId: user.id,
+    bankAccountId: data.id,
+    action: 'stored',
+    triggeredBy: 'user',
+    metadata: { companyId },
+  })
+
   return Response.json(data, { status: 201 })
 }
