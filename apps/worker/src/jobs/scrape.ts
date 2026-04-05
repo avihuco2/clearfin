@@ -207,7 +207,7 @@ export async function processScrapeJob(
     companyId: account.company_id as CompanyTypes,
     startDate,
     showBrowser: false,
-    verbose: false,
+    verbose: true,
     // Required for Chromium running inside Docker containers:
     // --no-sandbox: container runs as non-root without kernel namespaces
     // --disable-dev-shm-usage: /dev/shm is tiny in containers, use /tmp instead
@@ -246,11 +246,13 @@ export async function processScrapeJob(
   }
 
   if (!result.success) {
-    // Log errorMessage for debugging (contains no credentials)
+    // Save both errorType and errorMessage to the DB for debugging
+    const errorDetail = result.errorMessage
+      ? `${result.errorType ?? 'GENERIC'}: ${result.errorMessage}`
+      : (result.errorType ?? 'SCRAPE_FAILED')
     console.error(`[scrape] job=${job.id} errorType=${result.errorType} errorMessage=${result.errorMessage ?? 'none'}`)
-    const errorMessage = result.errorType ?? 'SCRAPE_FAILED'
-    await markError(bankAccountId, String(job.id), errorMessage)
-    throw new Error(errorMessage)
+    await markError(bankAccountId, String(job.id), errorDetail)
+    throw new Error(errorDetail)
   }
 
   // ------------------------------------------------------------------
