@@ -13,7 +13,7 @@
     "@clearfin/crypto": "*",
     "@supabase/supabase-js": "^2.49.0",
     "@upstash/redis": "^1.34.0",
-    "israeli-bank-scrapers": "^6.7.1",
+    "israeli-bank-scrapers": "^6.7.3",
     "node-cron": "^3.0.3",
     "patch-package": "^8.0.1"
   },
