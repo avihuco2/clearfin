@@ -212,8 +212,10 @@ export async function processScrapeJob(
     // --no-sandbox: container runs as non-root without kernel namespaces
     // --disable-dev-shm-usage: /dev/shm is tiny in containers, use /tmp instead
     // --disable-gpu: no GPU in headless server environment
+    timeout: 90000,
     puppeteerConfig: {
       executablePath: process.env['PUPPETEER_EXECUTABLE_PATH'] ?? '/usr/bin/chromium',
+      timeout: 90000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
