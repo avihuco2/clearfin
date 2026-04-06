@@ -108,17 +108,19 @@ jobs:
 
       - name: Create deployment archive
         run: |
+          # public/ is optional — only include if it exists
+          PUBLIC_ARG=""
+          [ -d "apps/web/public" ] && PUBLIC_ARG="apps/web/public"
           tar -czf deploy.tar.gz \
             --exclude='node_modules' \
-            --exclude='.next/cache' \
             --exclude='apps/web/.next/cache' \
             apps/web/.next \
-            apps/web/public \
             apps/web/package.json \
             apps/worker/dist \
             apps/worker/package.json \
             package.json \
-            package-lock.json
+            package-lock.json \
+            $PUBLIC_ARG
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
