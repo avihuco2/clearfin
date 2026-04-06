@@ -96,7 +96,7 @@ export default async function DashboardPage() {
     `,
 
     // 5. Total spend sum this month
-    sql<{ charged_amount: number }[]>`
+    sql`
       SELECT charged_amount FROM transactions
       WHERE user_id = ${userId}
         AND date >= ${monthStart}::date
@@ -151,7 +151,7 @@ export default async function DashboardPage() {
 
   // --- Summary figures ---
   const totalSpend = totalRes.reduce(
-    (sum, r) => sum + Math.abs(r.charged_amount),
+    (sum, r) => sum + Math.abs(Number(r['charged_amount'])),
     0,
   )
   const transactionCount = Number(txCountRes[0]?.count ?? 0)
