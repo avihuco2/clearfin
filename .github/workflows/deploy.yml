@@ -153,19 +153,20 @@ jobs:
           # Give SSM agent time to pick up the command before polling
           sleep 30
 
-          # Wait for command to finish (use list-command-invocations — more reliable in il-central-1)
+          # Wait for command to finish
           for i in $(seq 1 90); do
-            STATUS=$(aws ssm list-command-invocations \
+            RAW=$(aws ssm list-command-invocations \
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
               --query "CommandInvocations[0].Status" \
-              --output text 2>/dev/null) || STATUS=""
-            # Empty or "None" means not yet registered
-            if [ -z "$STATUS" ] || [ "$STATUS" = "None" ] || [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; then
-              echo "[$i/90] Status: ${STATUS:-Pending}"
-              sleep 10
-              continue
-            fi
+              --output text 2>&1) || true
+            STATUS="$RAW"
+            echo "[$i/90] Raw: $RAW"
+            # Empty, None, error text, or still running — keep waiting
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) ;;
+              *) sleep 10; continue ;;
+            esac
             echo "[$i/90] Final status: $STATUS"
             if [ "$STATUS" = "Success" ]; then
               echo "=== Deployment succeeded ==="
