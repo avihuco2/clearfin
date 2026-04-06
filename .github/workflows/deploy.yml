@@ -14,6 +14,7 @@ env:
   AWS_REGION: il-central-1
   APP_DIR: /opt/clearfin
   APP_USER: clearfin
+  ALB_URL: clearfin-alb-12244784.il-central-1.elb.amazonaws.com
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -150,43 +151,21 @@ jobs:
 
           echo "SSM Command ID: $COMMAND_ID"
 
-          # Give SSM agent time to pick up the command before polling
-          sleep 30
+          # SSM list-command-invocations is unreliable cross-region from GitHub Actions.
+          # Instead: wait for the deploy to finish (typically ~2 min), then verify via HTTP.
+          echo "Waiting 3 minutes for deployment to complete..."
+          sleep 180
 
-          # Wait for command to finish
-          for i in $(seq 1 90); do
-            RAW=$(aws ssm list-command-invocations \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "CommandInvocations[0].Status" \
-              --output text 2>&1) || true
-            STATUS="$RAW"
-            echo "[$i/90] Raw: $RAW"
-            # Empty, None, error text, or still running — keep waiting
-            case "$STATUS" in
-              Success|Failed|Cancelled|TimedOut) ;;
-              *) sleep 10; continue ;;
-            esac
-            echo "[$i/90] Final status: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
-              echo "=== Deployment succeeded ==="
-              aws ssm list-command-invocations \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --details \
-                --query "CommandInvocations[0].CommandPlugins[0].Output" \
-                --output text
+          ALB_URL="http://${{ env.ALB_URL }}"
+          echo "Verifying app at $ALB_URL ..."
+          for i in $(seq 1 12); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$ALB_URL/" || echo "0")
+            echo "[$i/12] HTTP: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+              echo "=== Deployment succeeded (app responding $HTTP_CODE) ==="
               exit 0
-            else
-              aws ssm list-command-invocations \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --details \
-                --query "CommandInvocations[0].CommandPlugins[0].Output" \
-                --output text
-              echo "Deployment failed with status: $STATUS"
-              exit 1
             fi
+            sleep 15
           done
-          echo "Timed out waiting for SSM command"
+          echo "App not responding after deployment — check SSM command $COMMAND_ID"
           exit 1
