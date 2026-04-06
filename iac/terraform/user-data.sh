@@ -20,7 +20,6 @@ dnf install -y \
   nginx \
   jq \
   aws-cli \
-  chromium \
   nss \
   atk \
   cups-libs \
@@ -31,7 +30,21 @@ dnf install -y \
   libXrandr \
   libgbm \
   pango \
-  alsa-lib
+  alsa-lib \
+  liberation-fonts \
+  xdg-utils
+
+# Google Chrome (Chromium is not in AL2023 repos)
+rpm --import https://dl.google.com/linux/linux_signing_key.pub
+cat > /etc/yum.repos.d/google-chrome.repo << 'CHROME'
+[google-chrome]
+name=google-chrome
+baseurl=https://dl.google.com/linux/chrome/rpm/stable/x86_64
+enabled=1
+gpgcheck=1
+gpgkey=https://dl.google.com/linux/linux_signing_key.pub
+CHROME
+dnf install -y google-chrome-stable
 
 # ---------------------------------------------------------------------------
 # Node.js 22 via NodeSource
@@ -61,7 +74,7 @@ SECRET_JSON=$(aws secretsmanager get-secret-value \
 # Write .env file for the app (owned by clearfin user, mode 600)
 ENV_FILE="$APP_DIR/.env"
 echo "$SECRET_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > "$ENV_FILE"
-echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium" >> "$ENV_FILE"
+echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable" >> "$ENV_FILE"
 echo "NODE_ENV=production" >> "$ENV_FILE"
 chown "$APP_USER:$APP_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
@@ -135,7 +148,7 @@ module.exports = {
       env_file: '/opt/clearfin/.env',
       env: {
         NODE_ENV: 'production',
-        PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium',
+        PUPPETEER_EXECUTABLE_PATH: '/usr/bin/google-chrome-stable',
       },
       instances: 1,
       autorestart: true,

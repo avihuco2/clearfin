@@ -38,16 +38,23 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 resource "aws_iam_role_policy" "secrets" {
-  name = "clearfin-secrets-read"
+  name = "clearfin-ec2-policy"
   role = aws_iam_role.ec2.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:clearfin/*"
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:clearfin/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:HeadObject"]
+        Resource = "arn:aws:s3:::clearfin-deploy-artifacts/*"
+      }
+    ]
   })
 }
 
