@@ -55,7 +55,8 @@ postgresql-setup --initdb
 # Listen only on loopback
 sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
 
-# Allow local password auth
+# Allow local password auth (change default ident to scram-sha-256, then add clearfin rule)
+sed -i "s/^host    all             all             127.0.0.1\/32            ident/host    all             all             127.0.0.1\/32            scram-sha-256/" /var/lib/pgsql/data/pg_hba.conf
 cat >> /var/lib/pgsql/data/pg_hba.conf << 'PGHBA'
 host    clearfin    clearfin    127.0.0.1/32    scram-sha-256
 PGHBA
