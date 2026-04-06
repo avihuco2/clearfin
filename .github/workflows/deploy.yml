@@ -159,7 +159,7 @@ jobs:
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
               --query "CommandInvocations[0].Status" \
-              --output text 2>/dev/null)
+              --output text 2>/dev/null) || STATUS=""
             # Empty or "None" means not yet registered
             if [ -z "$STATUS" ] || [ "$STATUS" = "None" ] || [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; then
               echo "[$i/90] Status: ${STATUS:-Pending}"
