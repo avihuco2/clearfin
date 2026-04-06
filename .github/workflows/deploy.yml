@@ -74,6 +74,11 @@ jobs:
         run: npm ci
 
       - name: Build web app
+        env:
+          # Dummy values — postgres.js and pg.Pool connect lazily (not at import time)
+          DATABASE_URL: "postgresql://localhost:5432/clearfin"
+          NEXTAUTH_SECRET: "build-time-placeholder-not-used"
+          NEXTAUTH_URL: "http://localhost:3000"
         run: |
           cd apps/web
           npm run build
