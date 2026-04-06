@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { createBrowserClient } from '@/lib/supabase/client'
 
 interface NewTransaction {
   id: string
@@ -10,9 +9,9 @@ interface NewTransaction {
   charged_amount: number
 }
 
-function isValidTransaction(payload: unknown): payload is NewTransaction {
-  if (!payload || typeof payload !== 'object') return false
-  const obj = payload as Record<string, unknown>
+function isValidTransaction(value: unknown): value is NewTransaction {
+  if (!value || typeof value !== 'object') return false
+  const obj = value as Record<string, unknown>
   return (
     typeof obj['id'] === 'string' &&
     typeof obj['description'] === 'string' &&
@@ -24,10 +23,13 @@ interface RealtimeTransactionsProps {
   userId: string
 }
 
+const POLL_INTERVAL_MS = 15_000
+
 export function RealtimeTransactions({ userId }: RealtimeTransactionsProps) {
   const [newTransactions, setNewTransactions] = useState<NewTransaction[]>([])
   const [dismissed, setDismissed] = useState(false)
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSeenIdRef = useRef<string | null>(null)
 
   const visible = !dismissed && newTransactions.length > 0
 
@@ -44,30 +46,51 @@ export function RealtimeTransactions({ userId }: RealtimeTransactionsProps) {
     }
   }, [newTransactions.length])
 
-  useEffect(() => {
-    const supabase = createBrowserClient()
+  const fetchLatest = useCallback(async () => {
+    try {
+      const res = await fetch('/api/transactions?limit=5', { cache: 'no-store' })
+      if (!res.ok) return
 
-    const channel = supabase
-      .channel('realtime-transactions')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'transactions',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          if (!isValidTransaction(payload.new)) return
-          setNewTransactions((prev) => [payload.new as NewTransaction, ...prev])
-        }
-      )
-      .subscribe()
+      const data: unknown = await res.json()
+      if (!Array.isArray(data)) return
 
-    return () => {
-      supabase.removeChannel(channel)
+      const validated = data.filter(isValidTransaction)
+      if (validated.length === 0) return
+
+      const topId = validated[0].id
+
+      // On first poll just record the baseline — don't announce existing transactions
+      if (lastSeenIdRef.current === null) {
+        lastSeenIdRef.current = topId
+        return
+      }
+
+      // Nothing new since last poll
+      if (topId === lastSeenIdRef.current) return
+
+      // Find which transactions arrived after the last known one
+      const knownIndex = validated.findIndex((t) => t.id === lastSeenIdRef.current)
+      const incoming = knownIndex === -1 ? validated : validated.slice(0, knownIndex)
+
+      if (incoming.length > 0) {
+        lastSeenIdRef.current = topId
+        setNewTransactions((prev) => [...incoming, ...prev])
+      }
+    } catch {
+      // Silently ignore network errors — this is best-effort notification only
     }
-  }, [userId])
+  }, [])
+
+  useEffect(() => {
+    // Run immediately so we capture the baseline before the first interval fires
+    void fetchLatest()
+
+    const intervalId = setInterval(() => {
+      void fetchLatest()
+    }, POLL_INTERVAL_MS)
+
+    return () => clearInterval(intervalId)
+  }, [fetchLatest, userId])
 
   if (!visible) return null
 

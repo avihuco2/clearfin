@@ -2,7 +2,7 @@ import { createScraper, CompanyTypes } from 'israeli-bank-scrapers'
 import type { ScraperCredentials } from 'israeli-bank-scrapers'
 import type { Job } from 'bullmq'
 import { decrypt } from '@clearfin/crypto'
-import { supabase } from '../lib/supabase.js'
+import { sql } from '../lib/db.js'
 import { redis } from '../lib/redis.js'
 
 async function logCredentialAccess(
@@ -12,16 +12,12 @@ async function logCredentialAccess(
   triggeredBy: 'manual' | 'schedule',
 ): Promise<void> {
   try {
-    const { error } = await supabase.from('credential_access_logs').insert({
-      user_id: userId,
-      bank_account_id: bankAccountId,
-      action: 'decrypted',
-      triggered_by: triggeredBy,
-      scrape_job_id: jobId,
-    })
-    if (error) console.error('[audit] failed to write log:', error.message)
+    await sql`
+      INSERT INTO credential_access_logs (user_id, bank_account_id, action, triggered_by, scrape_job_id)
+      VALUES (${userId}, ${bankAccountId}, 'decrypted', ${triggeredBy}, ${jobId})
+    `
   } catch (err) {
-    console.error('[audit] unexpected error:', err)
+    console.error('[audit] unexpected error:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -56,10 +52,7 @@ const OTP_TIMEOUT_MS = 120_000
 
 async function waitForOtp(bankAccountId: string): Promise<string> {
   // Signal the frontend that the scraper needs a one-time password
-  await supabase
-    .from('bank_accounts')
-    .update({ scrape_status: 'awaiting_otp' })
-    .eq('id', bankAccountId)
+  await sql`UPDATE bank_accounts SET scrape_status = 'awaiting_otp' WHERE id = ${bankAccountId}`
 
   return new Promise<string>((resolve, reject) => {
     const deadline = setTimeout(() => {
@@ -128,19 +121,15 @@ export async function processScrapeJob(
   // ------------------------------------------------------------------
   // 1. Fetch encrypted credentials — always scoped to user_id
   // ------------------------------------------------------------------
-  const { data: account, error: fetchError } = await supabase
-    .from('bank_accounts')
-    .select(
-      'company_id, encrypted_credentials, credentials_iv, credentials_tag, last_scraped_at',
-    )
-    .eq('id', bankAccountId)
-    .eq('user_id', userId)
-    .single()
+  const accounts = await sql`
+    SELECT company_id, encrypted_credentials, credentials_iv, credentials_tag, last_scraped_at
+    FROM bank_accounts
+    WHERE id = ${bankAccountId} AND user_id = ${userId}
+  `
+  const account = accounts[0]
 
-  if (fetchError || !account) {
-    throw new Error(
-      `bank_account not found: id=${bankAccountId} user=${userId}`,
-    )
+  if (!account) {
+    throw new Error(`bank_account not found: id=${bankAccountId} user=${userId}`)
   }
 
   // ------------------------------------------------------------------
@@ -173,17 +162,9 @@ export async function processScrapeJob(
   // ------------------------------------------------------------------
   // 3. Mark job + account as running
   // ------------------------------------------------------------------
-  const startedAt = new Date().toISOString()
-
   await Promise.all([
-    supabase
-      .from('scrape_jobs')
-      .update({ status: 'running', started_at: startedAt })
-      .eq('id', job.id),
-    supabase
-      .from('bank_accounts')
-      .update({ scrape_status: 'running' })
-      .eq('id', bankAccountId),
+    sql`UPDATE scrape_jobs SET status = 'running', started_at = NOW() WHERE id = ${String(job.id)}`,
+    sql`UPDATE bank_accounts SET scrape_status = 'running' WHERE id = ${bankAccountId}`,
   ])
 
   // ------------------------------------------------------------------
@@ -194,14 +175,12 @@ export async function processScrapeJob(
   // If not, we always do a full 3-month backfill even if last_scraped_at is set
   // (last_scraped_at can be set from a scrape that succeeded technically but
   //  saved 0 rows, e.g. due to a now-fixed schema constraint).
-  const { count: txnCount } = await supabase
-    .from('transactions')
-    .select('id', { count: 'exact', head: true })
-    .eq('bank_account_id', bankAccountId)
-
-  const hasTransactions = (txnCount ?? 0) > 0
+  const txnCountRows = await sql`
+    SELECT COUNT(*) AS cnt FROM transactions WHERE bank_account_id = ${bankAccountId}
+  `
+  const hasTransactions = parseInt(txnCountRows[0]?.cnt ?? '0', 10) > 0
   const startDate = resolveStartDate(account.last_scraped_at as string | null, hasTransactions)
-  console.log(`[scrape] job=${job.id} startDate=${startDate.toISOString().slice(0,10)} hasTransactions=${hasTransactions}`)
+  console.log(`[scrape] job=${job.id} startDate=${startDate.toISOString().slice(0, 10)} hasTransactions=${hasTransactions}`)
 
   const scraper = createScraper({
     companyId: account.company_id as CompanyTypes,
@@ -258,22 +237,22 @@ export async function processScrapeJob(
   // 5. Upsert transactions
   // ------------------------------------------------------------------
   let transactionsAdded = 0
-  const accounts = result.accounts ?? []
+  const scraperAccounts = result.accounts ?? []
 
-  console.log(`[scrape] job=${job.id} accounts=${accounts.length} totalTxns=${accounts.reduce((s, a) => s + a.txns.length, 0)}`)
+  console.log(`[scrape] job=${job.id} accounts=${scraperAccounts.length} totalTxns=${scraperAccounts.reduce((s, a) => s + a.txns.length, 0)}`)
 
-  for (const acc of accounts) {
+  for (const acc of scraperAccounts) {
     console.log(`[scrape] job=${job.id} account=${acc.accountNumber ?? 'unknown'} txns=${acc.txns.length}`)
+
     // Persist latest balance when available
     if (acc.balance !== undefined) {
-      await supabase
-        .from('bank_accounts')
-        .update({
-          account_number: acc.accountNumber ?? null,
-          balance: acc.balance,
-          balance_updated_at: new Date().toISOString(),
-        })
-        .eq('id', bankAccountId)
+      await sql`
+        UPDATE bank_accounts
+        SET account_number = ${acc.accountNumber ?? null},
+            balance = ${acc.balance},
+            balance_updated_at = NOW()
+        WHERE id = ${bankAccountId}
+      `
     }
 
     if (acc.txns.length === 0) continue
@@ -310,44 +289,51 @@ export async function processScrapeJob(
       })
       .filter((row) => row.charged_amount !== 0)
 
-    const { count, error: upsertError } = await supabase
-      .from('transactions')
-      .upsert(rows, {
-        onConflict: 'bank_account_id,external_id',
-        ignoreDuplicates: true,
-        count: 'exact',
-      })
-
-    if (upsertError) {
-      console.error(`[scrape] upsert error bankAccountId=${bankAccountId}:`, upsertError.message, upsertError.code, upsertError.details)
+    let batchAdded = 0
+    for (const row of rows) {
+      try {
+        const res = await sql`
+          INSERT INTO transactions (
+            user_id, bank_account_id, external_id, date, processed_date,
+            description, memo, original_amount, original_currency,
+            charged_amount, charged_currency, type, status,
+            installment_number, installment_total, sub_account
+          ) VALUES (
+            ${row.user_id}, ${row.bank_account_id}, ${row.external_id},
+            ${row.date}, ${row.processed_date},
+            ${row.description}, ${row.memo}, ${row.original_amount}, ${row.original_currency},
+            ${row.charged_amount}, ${row.charged_currency}, ${row.type}, ${row.status},
+            ${row.installment_number}, ${row.installment_total}, ${row.sub_account}
+          )
+          ON CONFLICT (bank_account_id, external_id) DO NOTHING
+        `
+        batchAdded += res.count
+      } catch (insertErr) {
+        console.error(
+          `[scrape] insert error bankAccountId=${bankAccountId} externalId=${row.external_id}:`,
+          insertErr instanceof Error ? insertErr.message : insertErr,
+        )
+      }
     }
 
-    console.log(`[scrape] job=${job.id} upsert count=${count} error=${upsertError?.message ?? 'none'}`)
-    transactionsAdded += count ?? 0
+    console.log(`[scrape] job=${job.id} upsert count=${batchAdded}`)
+    transactionsAdded += batchAdded
   }
 
   // ------------------------------------------------------------------
   // 6. Mark done
   // ------------------------------------------------------------------
-  const finishedAt = new Date().toISOString()
-
   await Promise.all([
-    supabase
-      .from('bank_accounts')
-      .update({
-        scrape_status: 'idle',
-        scrape_error: null,
-        last_scraped_at: finishedAt,
-      })
-      .eq('id', bankAccountId),
-    supabase
-      .from('scrape_jobs')
-      .update({
-        status: 'done',
-        transactions_added: transactionsAdded,
-        finished_at: finishedAt,
-      })
-      .eq('id', job.id),
+    sql`
+      UPDATE bank_accounts
+      SET scrape_status = 'idle', scrape_error = NULL, last_scraped_at = NOW()
+      WHERE id = ${bankAccountId}
+    `,
+    sql`
+      UPDATE scrape_jobs
+      SET status = 'done', transactions_added = ${transactionsAdded}, finished_at = NOW()
+      WHERE id = ${String(job.id)}
+    `,
   ])
 
   console.log(
@@ -368,17 +354,15 @@ async function markError(
   message: string,
 ): Promise<void> {
   await Promise.all([
-    supabase
-      .from('bank_accounts')
-      .update({ scrape_status: 'error', scrape_error: message })
-      .eq('id', bankAccountId),
-    supabase
-      .from('scrape_jobs')
-      .update({
-        status: 'error',
-        error_message: message,
-        finished_at: new Date().toISOString(),
-      })
-      .eq('id', jobId),
+    sql`
+      UPDATE bank_accounts
+      SET scrape_status = 'error', scrape_error = ${message}
+      WHERE id = ${bankAccountId}
+    `,
+    sql`
+      UPDATE scrape_jobs
+      SET status = 'error', error_message = ${message}, finished_at = NOW()
+      WHERE id = ${jobId}
+    `,
   ])
 }

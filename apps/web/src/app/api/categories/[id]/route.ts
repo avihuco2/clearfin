@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 
 const ParamsSchema = z.object({ id: z.string().uuid() })
 
@@ -8,28 +9,18 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid id' }, { status: 400 })
 
   const { id } = parsed.data
 
-  // Only user-owned categories can be deleted (RLS also enforces this)
-  const { data: cat } = await supabase
-    .from('categories')
-    .select('id, user_id')
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+  const rows = await sql`SELECT id FROM categories WHERE id = ${id} AND user_id = ${user.id}`
+  if (!rows[0]) return Response.json({ error: 'Not found' }, { status: 404 })
 
-  if (!cat) return Response.json({ error: 'Not found' }, { status: 404 })
-
-  const { error } = await supabase.from('categories').delete().eq('id', id)
-  if (error) return Response.json({ error: 'Failed to delete' }, { status: 500 })
-
+  await sql`DELETE FROM categories WHERE id = ${id} AND user_id = ${user.id}`
   return new Response(null, { status: 204 })
 }
 
@@ -37,9 +28,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid id' }, { status: 400 })
@@ -47,22 +37,15 @@ export async function PATCH(
   const { id } = parsed.data
   const body = await req.json() as { nameHe?: string; icon?: string; color?: string }
 
-  const { data: cat } = await supabase
-    .from('categories')
-    .select('id')
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+  const rows = await sql`SELECT id FROM categories WHERE id = ${id} AND user_id = ${user.id}`
+  if (!rows[0]) return Response.json({ error: 'Not found' }, { status: 404 })
 
-  if (!cat) return Response.json({ error: 'Not found' }, { status: 404 })
-
-  const updates: Record<string, string> = {}
-  if (body.nameHe) updates.name_he = body.nameHe
-  if (body.icon !== undefined) updates.icon = body.icon
-  if (body.color !== undefined) updates.color = body.color
-
-  const { error } = await supabase.from('categories').update(updates).eq('id', id)
-  if (error) return Response.json({ error: 'Failed to update' }, { status: 500 })
-
+  await sql`
+    UPDATE categories SET
+      name_he = COALESCE(${body.nameHe ?? null}, name_he),
+      icon    = CASE WHEN ${body.icon !== undefined} THEN ${body.icon ?? null} ELSE icon END,
+      color   = CASE WHEN ${body.color !== undefined} THEN ${body.color ?? null} ELSE color END
+    WHERE id = ${id} AND user_id = ${user.id}
+  `
   return Response.json({ ok: true })
 }

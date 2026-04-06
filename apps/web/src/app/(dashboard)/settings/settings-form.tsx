@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createBrowserClient } from '@/lib/supabase/client'
+import { signOut } from 'next-auth/react'
 import { formatDate } from '@/lib/format'
 import { API_ROUTES } from '@/lib/api-routes'
 
@@ -31,7 +31,6 @@ const FREQUENCY_OPTIONS: { value: ScrapeFrequency; label: string }[] = [
 
 export function SettingsForm({ displayName, email, accounts }: SettingsFormProps) {
   const router = useRouter()
-  const supabase = createBrowserClient()
 
   // Profile section
   const [name, setName] = useState(displayName)
@@ -58,15 +57,18 @@ export function SettingsForm({ displayName, email, accounts }: SettingsFormProps
     setNameError(null)
     setNameSuccess(false)
 
-    const { error } = await supabase.auth.updateUser({
-      data: { full_name: name.trim() },
-    })
-
-    if (error) {
-      setNameError('שגיאה בשמירת השם. נסה שוב.')
-    } else {
+    try {
+      const res = await fetch('/api/user/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+      if (!res.ok) throw new Error('שגיאה בשמירת השם')
       setNameSuccess(true)
       setTimeout(() => setNameSuccess(false), 2500)
+      router.refresh()
+    } catch {
+      setNameError('שגיאה בשמירת השם. נסה שוב.')
     }
     setNameSaving(false)
   }
@@ -101,8 +103,7 @@ export function SettingsForm({ displayName, email, accounts }: SettingsFormProps
   // --- Sign out ---
   async function handleSignOut() {
     setSigningOut(true)
-    await supabase.auth.signOut()
-    router.push('/login')
+    await signOut({ callbackUrl: '/login' })
   }
 
   return (

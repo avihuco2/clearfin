@@ -1,6 +1,6 @@
 import http from 'node:http'
 import cron from 'node-cron'
-import { supabase } from './lib/supabase.js'
+import { sql } from './lib/db.js'
 import { processScrapeJob } from './jobs/scrape.js'
 import type { ScrapeJobData } from './jobs/scrape.js'
 
@@ -40,33 +40,35 @@ async function pollAndProcess(): Promise<void> {
   if (activeJobs >= concurrency) return
 
   const slots = concurrency - activeJobs
-  const { data: jobs, error } = await supabase
-    .from('scrape_jobs')
-    .select('id, user_id, bank_account_id, triggered_by')
-    .eq('status', 'queued')
-    .order('created_at', { ascending: true })
-    .limit(slots)
+  const jobs = await sql`
+    SELECT id, user_id, bank_account_id, triggered_by
+    FROM scrape_jobs
+    WHERE status = 'queued'
+    ORDER BY created_at ASC
+    LIMIT ${slots}
+  `.catch((err: unknown) => {
+    console.error('[poller] failed to fetch queued jobs:', err instanceof Error ? err.message : err)
+    return [] as typeof jobs
+  })
 
-  if (error) {
-    console.error('[poller] failed to fetch queued jobs:', error.message)
-    return
-  }
-  if (!jobs?.length) return
+  if (!jobs.length) return
 
   for (const row of jobs) {
     // Claim the job atomically — only process if we can flip it to 'running'
-    const { data: claimed } = await supabase
-      .from('scrape_jobs')
-      .update({ status: 'running', started_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .eq('status', 'queued')   // guard against double-claiming
-      .select('id')
-      .single()
+    const claimed = await sql`
+      UPDATE scrape_jobs
+      SET status = 'running', started_at = NOW()
+      WHERE id = ${row.id as string} AND status = 'queued'
+      RETURNING id
+    `.catch((err: unknown) => {
+      console.error('[poller] failed to claim job:', err instanceof Error ? err.message : err)
+      return []
+    })
 
-    if (!claimed) continue   // another worker claimed it first
+    if (!claimed.length) continue   // another worker claimed it first
 
     activeJobs++
-    console.log(`[poller] claimed job=${row.id} bankAccountId=${row.bank_account_id}`)
+    console.log(`[poller] claimed job=${row.id as string} bankAccountId=${row.bank_account_id as string}`)
 
     const jobData: ScrapeJobData = {
       userId:        row.user_id as string,
@@ -77,10 +79,10 @@ async function pollAndProcess(): Promise<void> {
     // Run in background — don't await so poller can continue
     processScrapeJob({ id: row.id, data: jobData } as never)
       .then(result => {
-        console.log(`[poller] job=${row.id} done transactionsAdded=${result.transactionsAdded}`)
+        console.log(`[poller] job=${row.id as string} done transactionsAdded=${result.transactionsAdded}`)
       })
       .catch(err => {
-        console.error(`[poller] job=${row.id} failed:`, err instanceof Error ? err.message : err)
+        console.error(`[poller] job=${row.id as string} failed:`, err instanceof Error ? err.message : err)
       })
       .finally(() => { activeJobs-- })
   }
@@ -137,6 +139,10 @@ async function shutdown(signal: string): Promise<void> {
   while (activeJobs > 0 && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 500))
   }
+
+  // Close DB connection pool cleanly
+  await sql.end()
+
   console.log('[worker] shutdown complete')
   process.exit(0)
 }

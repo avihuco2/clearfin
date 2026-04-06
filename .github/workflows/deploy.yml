@@ -45,30 +45,10 @@ jobs:
 
       - name: Terraform Plan
         working-directory: iac/terraform
-        env:
-          TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
-          TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
-          TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          TF_VAR_credentials_encryption_key: ${{ secrets.CREDENTIALS_ENCRYPTION_KEY }}
-          TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          TF_VAR_upstash_redis_rest_url: ${{ secrets.UPSTASH_REDIS_REST_URL }}
-          TF_VAR_upstash_redis_rest_token: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
-          TF_VAR_next_public_supabase_url: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          TF_VAR_next_public_supabase_anon_key: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: terraform plan -out=tfplan
 
       - name: Terraform Apply
         working-directory: iac/terraform
-        env:
-          TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
-          TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
-          TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          TF_VAR_credentials_encryption_key: ${{ secrets.CREDENTIALS_ENCRYPTION_KEY }}
-          TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          TF_VAR_upstash_redis_rest_url: ${{ secrets.UPSTASH_REDIS_REST_URL }}
-          TF_VAR_upstash_redis_rest_token: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
-          TF_VAR_next_public_supabase_url: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          TF_VAR_next_public_supabase_anon_key: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: terraform apply tfplan
 
   # ---------------------------------------------------------------------------
@@ -94,9 +74,6 @@ jobs:
         run: npm ci
 
       - name: Build web app
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
           cd apps/web
           npm run build
@@ -119,6 +96,8 @@ jobs:
             apps/worker/package.json \
             package.json \
             package-lock.json \
+            scripts \
+            supabase/migrations \
             $PUBLIC_ARG
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -154,6 +133,7 @@ jobs:
               'cp -r \$APP_DIR/apps/web/.next/static \$APP_DIR/apps/web/.next/standalone/apps/web/.next/static',
               'if [ -d \$APP_DIR/apps/web/public ]; then mkdir -p \$APP_DIR/apps/web/.next/standalone/apps/web/public && cp -r \$APP_DIR/apps/web/public/. \$APP_DIR/apps/web/.next/standalone/apps/web/public/; fi',
               'chown -R \$APP_USER:\$APP_USER \$APP_DIR',
+              'cd \$APP_DIR && DATABASE_URL=$(grep DATABASE_URL \$APP_DIR/.env | cut -d= -f2-) npx tsx scripts/migrate.ts 2>&1 | tail -20',
               'sudo -u \$APP_USER pm2 startOrReload \$APP_DIR/ecosystem.config.cjs --update-env',
               'sudo -u \$APP_USER pm2 save',
               'rm -f /tmp/deploy.tar.gz',

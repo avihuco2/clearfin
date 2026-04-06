@@ -47,6 +47,27 @@ CHROME
 dnf install -y google-chrome-stable
 
 # ---------------------------------------------------------------------------
+# PostgreSQL 16
+# ---------------------------------------------------------------------------
+dnf install -y postgresql16-server postgresql16
+postgresql-setup --initdb
+
+# Listen only on loopback
+sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
+
+# Allow local password auth
+cat >> /var/lib/pgsql/data/pg_hba.conf << 'PGHBA'
+host    clearfin    clearfin    127.0.0.1/32    scram-sha-256
+PGHBA
+
+systemctl enable postgresql
+systemctl start postgresql
+
+# Create DB user and database (password comes from secrets fetched later — placeholder user first)
+sudo -u postgres psql -c "CREATE USER clearfin WITH LOGIN;" 2>/dev/null || true
+sudo -u postgres psql -c "CREATE DATABASE clearfin OWNER clearfin;" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # Node.js 22 via NodeSource
 # ---------------------------------------------------------------------------
 curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
@@ -78,6 +99,10 @@ echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable" >> "$ENV_FILE"
 echo "NODE_ENV=production" >> "$ENV_FILE"
 chown "$APP_USER:$APP_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+
+# Set PostgreSQL password from secrets
+DB_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.DB_PASSWORD')
+sudo -u postgres psql -c "ALTER USER clearfin WITH PASSWORD '${DB_PASSWORD}';"
 
 # ---------------------------------------------------------------------------
 # Nginx reverse proxy (port 80 → app port 3000)

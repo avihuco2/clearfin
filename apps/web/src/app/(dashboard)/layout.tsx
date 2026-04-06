@@ -1,18 +1,16 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { SidebarNav } from '@/components/sidebar-nav'
 import { BottomNav } from '@/components/bottom-nav'
 import { RealtimeTransactions } from '@/components/realtime-transactions'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createServerComponentClient({ cookies })
-  const { data: { session } } = await supabase.auth.getSession()
+  const session = await auth()
   if (!session) redirect('/login')
 
   const displayName =
-    session.user.user_metadata?.['full_name'] ??
-    session.user.email ??
+    session.user?.name ??
+    session.user?.email ??
     'משתמש'
 
   return (
@@ -34,8 +32,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* Mobile bottom tab nav */}
       <BottomNav />
 
-      {/* Realtime banner */}
-      <RealtimeTransactions userId={session.user.id} />
+      {/* Polling-based new transaction banner */}
+      <RealtimeTransactions userId={session.user?.id ?? ''} />
 
       {/* Main content */}
       <main className="flex-1 overflow-auto md:me-60" id="main-content">

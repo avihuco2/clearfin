@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 
 const ListSchema = z.object({
   accountId: z.string().uuid().optional(),
@@ -12,9 +13,8 @@ const ListSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const sp = Object.fromEntries(req.nextUrl.searchParams)
   const parsed = ListSchema.safeParse(sp)
@@ -22,19 +22,17 @@ export async function GET(req: NextRequest) {
 
   const { accountId, categoryId, from, to, limit, offset } = parsed.data
 
-  let query = supabase
-    .from('transactions')
-    .select('id, date, description, charged_amount, charged_currency, type, status, category_id, notes, bank_account_id')
-    .eq('user_id', user.id)  // defence in depth — explicit ownership filter beyond RLS
-    .order('date', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  if (accountId) query = query.eq('bank_account_id', accountId)
-  if (categoryId) query = query.eq('category_id', categoryId)
-  if (from) query = query.gte('date', from)
-  if (to) query = query.lte('date', to)
-
-  const { data, error } = await query
-  if (error) return Response.json({ error: 'Failed to fetch transactions' }, { status: 500 })
+  const data = await sql`
+    SELECT id, date, description, charged_amount, charged_currency, type, status,
+           category_id, notes, bank_account_id
+    FROM transactions
+    WHERE user_id = ${user.id}
+      AND (${accountId ?? null}::uuid IS NULL OR bank_account_id = ${accountId ?? null}::uuid)
+      AND (${categoryId ?? null}::uuid IS NULL OR category_id = ${categoryId ?? null}::uuid)
+      AND (${from ?? null}::date IS NULL OR date >= ${from ?? null}::date)
+      AND (${to ?? null}::date IS NULL OR date <= ${to ?? null}::date)
+    ORDER BY date DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `
   return Response.json(data)
 }

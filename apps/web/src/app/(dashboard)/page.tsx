@@ -1,28 +1,29 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import Link from 'next/link'
+import { auth } from '@/lib/auth'
+import { sql } from '@clearfin/db/client'
 import { formatCurrency } from '@/lib/format'
 import { ScrapeAllButton } from '@/components/scrape-all-button'
+import { redirect } from 'next/navigation'
 
 export default async function DashboardPage() {
-  const supabase = createServerComponentClient({ cookies })
-  const { data: { session } } = await supabase.auth.getSession()
+  const session = await auth()
+  if (!session?.user?.id) redirect('/login')
 
+  const userId = session.user.id
   const displayName =
-    (session?.user.user_metadata?.['full_name'] as string | undefined)?.split(' ')[0] ??
-    session?.user.email ??
-    'משתמש'
+    (session.user.name ?? session.user.email ?? 'משתמש').split(' ')[0]
 
-  const [accountsResult, transactionsResult, pendingResult] = await Promise.all([
-    supabase.from('bank_accounts').select('id', { count: 'exact', head: true }),
-    supabase.from('transactions').select('charged_amount', { count: 'exact' }).order('date', { ascending: false }).limit(200),
-    supabase.from('transactions').select('id', { count: 'exact', head: true }).is('category_id', null),
+  const [accountsRes, txRes, pendingRes] = await Promise.all([
+    sql`SELECT COUNT(*) FROM bank_accounts WHERE user_id = ${userId}`,
+    sql`SELECT charged_amount FROM transactions WHERE user_id = ${userId} ORDER BY date DESC LIMIT 200`,
+    sql`SELECT COUNT(*) FROM transactions WHERE user_id = ${userId} AND category_id IS NULL`,
   ])
 
-  const accountCount   = accountsResult.count ?? 0
-  const txCount        = transactionsResult.count ?? 0
-  const pendingCount   = pendingResult.count ?? 0
-  const totalSpent     = transactionsResult.data?.reduce((s, t) => s + (t.charged_amount ?? 0), 0) ?? 0
+  const accountCount = Number(accountsRes[0]?.count ?? 0)
+  const txRows = txRes as { charged_amount: number }[]
+  const txCount = txRows.length
+  const pendingCount = Number(pendingRes[0]?.count ?? 0)
+  const totalSpent = txRows.reduce((s, t) => s + (t.charged_amount ?? 0), 0)
 
   return (
     <div className="space-y-7">

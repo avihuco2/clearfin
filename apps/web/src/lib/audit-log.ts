@@ -1,4 +1,4 @@
-import { createAdminClient } from './supabase/server'
+import { sql } from '@clearfin/db/client'
 
 export type CredentialAction = 'stored' | 'updated' | 'deleted' | 'decrypted'
 
@@ -13,24 +13,25 @@ interface LogOptions {
 
 /**
  * Write a credential access event to credential_access_logs.
- * Uses the service-role client so it can bypass RLS.
+ * Uses a direct sql connection so it bypasses RLS (equivalent to service-role).
  * Failures are logged but never thrown — auditing must not break the main flow.
  */
 export async function logCredentialAccess(opts: LogOptions): Promise<void> {
   try {
-    const supabase = createAdminClient()
-    const { error } = await supabase.from('credential_access_logs').insert({
-      user_id: opts.userId,
-      bank_account_id: opts.bankAccountId,
-      action: opts.action,
-      triggered_by: opts.triggeredBy ?? null,
-      scrape_job_id: opts.scrapeJobId ?? null,
-      metadata: opts.metadata ?? null,
-    })
-    if (error) {
-      console.error('[audit] failed to write log:', error.message)
-    }
+    await sql`
+      INSERT INTO credential_access_logs
+        (user_id, bank_account_id, action, triggered_by, scrape_job_id, metadata)
+      VALUES
+        (
+          ${opts.userId},
+          ${opts.bankAccountId},
+          ${opts.action},
+          ${opts.triggeredBy ?? null},
+          ${opts.scrapeJobId ?? null},
+          ${opts.metadata ? JSON.stringify(opts.metadata) : null}
+        )
+    `
   } catch (err) {
-    console.error('[audit] unexpected error:', err)
+    console.error('[audit] failed to write log:', err)
   }
 }

@@ -10,7 +10,8 @@
     "dev:worker": "npm run dev --workspace=apps/worker",
     "build": "npm run build --workspace=apps/web",
     "type-check": "npm run type-check --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "migrate": "tsx scripts/migrate.ts"
   },
   "engines": {
     "node": ">=22.0.0"

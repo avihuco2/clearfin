@@ -1,5 +1,6 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { auth } from '@/lib/auth'
+import { sql } from '@clearfin/db/client'
 import { SettingsForm } from './settings-form'
 import { CategoryManager } from '@/components/category-manager'
 
@@ -17,7 +18,7 @@ interface CategoryWithCount {
   icon: string | null
   color: string | null
   user_id: string | null
-  transactions: { count: number }[]
+  transactionCount: number
 }
 
 const COMPANY_LABELS: Record<string, string> = {
@@ -32,35 +33,35 @@ const COMPANY_LABELS: Record<string, string> = {
 }
 
 export default async function SettingsPage() {
-  const supabase = createServerComponentClient({ cookies })
+  const session = await auth()
+  if (!session?.user?.id) redirect('/login')
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
+  const userId = session.user.id
 
-  const [{ data: accounts }, { data: categories }] = await Promise.all([
-    supabase
-      .from('bank_accounts')
-      .select('id, company_id, display_name, last_scraped_at')
-      .order('created_at', { ascending: false })
-      .returns<BankAccount[]>(),
-    supabase
-      .from('categories')
-      .select('id, name_he, name_en, icon, color, user_id, transactions(count)')
-      .order('name_he', { ascending: true })
-      .returns<CategoryWithCount[]>(),
+  const [accounts, categories] = await Promise.all([
+    sql<BankAccount[]>`
+      SELECT id, company_id, display_name, last_scraped_at
+      FROM bank_accounts
+      WHERE user_id = ${userId}
+      ORDER BY created_at DESC
+    `,
+    sql<CategoryWithCount[]>`
+      SELECT
+        c.id, c.name_he, c.name_en, c.icon, c.color, c.user_id,
+        COUNT(t.id)::int AS "transactionCount"
+      FROM categories c
+      LEFT JOIN transactions t ON t.category_id = c.id AND t.user_id = ${userId}
+      WHERE c.user_id IS NULL OR c.user_id = ${userId}
+      GROUP BY c.id
+      ORDER BY c.name_he ASC
+    `,
   ])
 
-  const displayName =
-    session?.user.user_metadata?.['full_name'] ?? session?.user.email ?? 'משתמש'
-  const email = session?.user.email ?? ''
+  const displayName = session.user.name ?? session.user.email ?? 'משתמש'
+  const email = session.user.email ?? ''
 
-  const enriched = (categories ?? []).map((c) => ({
-    ...c,
-    transactionCount: c.transactions?.[0]?.count ?? 0,
-  }))
-  const systemCategories = enriched.filter((c) => c.user_id === null)
-  const userCategories = enriched.filter((c) => c.user_id !== null)
+  const systemCategories = categories.filter((c) => c.user_id === null)
+  const userCategories = categories.filter((c) => c.user_id !== null)
 
   return (
     <div className="space-y-10">
@@ -74,7 +75,7 @@ export default async function SettingsPage() {
       <SettingsForm
         displayName={displayName}
         email={email}
-        accounts={(accounts ?? []).map((a) => ({
+        accounts={accounts.map((a) => ({
           ...a,
           companyLabel: COMPANY_LABELS[a.company_id] ?? a.company_id,
         }))}

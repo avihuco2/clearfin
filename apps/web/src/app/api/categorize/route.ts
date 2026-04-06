@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { google } from '@ai-sdk/google'
 import { generateText } from 'ai'
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 
 const TriggerSchema = z.object({
   bankAccountId: z.string().uuid().optional(),
@@ -14,12 +15,8 @@ const BATCH_SIZE = 50
 const MODEL = google('gemini-2.5-flash-lite')
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const parsed = TriggerSchema.safeParse(body)
@@ -27,33 +24,24 @@ export async function POST(req: NextRequest) {
 
   const { bankAccountId, since, transactionId } = parsed.data
 
-  // Fetch all available categories (system + user's own)
-  const { data: categoriesData } = await supabase
-    .from('categories')
-    .select('id, name_he, icon')
-    .or(`user_id.is.null,user_id.eq.${user.id}`)
+  const categoriesData = await sql`
+    SELECT id, name_he, icon FROM categories
+    WHERE user_id IS NULL OR user_id = ${user.id}
+  `
 
-  // Mutable maps — grow as new categories are created during this run
-  const categoryMap = new Map<string, string>(
-    (categoriesData ?? []).map((c) => [c.name_he, c.id]),
-  )
+  const categoryMap = new Map<string, string>(categoriesData.map((c) => [c.name_he as string, c.id as string]))
   const iconMap = new Map<string, string>(
-    (categoriesData ?? []).filter((c) => c.icon).map((c) => [c.name_he, c.icon]),
+    categoriesData.filter((c) => c.icon).map((c) => [c.name_he as string, c.icon as string]),
   )
 
   // ── Single-transaction mode ──────────────────────────────────────────────
   if (transactionId) {
-    const { data: tx, error: txError } = await supabase
-      .from('transactions')
-      .select('id, description, memo')
-      .eq('id', transactionId)
-      .eq('user_id', user.id)
-      .single()
-
-    if (txError || !tx) {
-      console.error('[categorize] tx fetch error:', txError)
-      return Response.json({ error: 'עסקה לא נמצאה' }, { status: 404 })
-    }
+    const txRows = await sql`
+      SELECT id, description, memo FROM transactions
+      WHERE id = ${transactionId} AND user_id = ${user.id}
+    `
+    const tx = txRows[0]
+    if (!tx) return Response.json({ error: 'עסקה לא נמצאה' }, { status: 404 })
 
     const description = `${tx.description}${tx.memo ? ` (${tx.memo})` : ''}`
     const prompt =
@@ -75,68 +63,50 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error('[categorize] AI error:', msg)
       return Response.json({ error: `AI error: ${msg}` }, { status: 500 })
     }
 
-    if (!categoryName) {
-      return Response.json({ error: 'לא הוחזרה קטגוריה' }, { status: 500 })
-    }
+    if (!categoryName) return Response.json({ error: 'לא הוחזרה קטגוריה' }, { status: 500 })
 
-    // Create new category if needed
     let categoryId = categoryMap.get(categoryName)
     const isNew = !categoryId
     if (isNew) {
-      const { data: created } = await supabase
-        .from('categories')
-        .insert({ user_id: user.id, name_he: categoryName, icon: categoryIcon ?? null })
-        .select('id, name_he, icon')
-        .single()
-      if (created) {
-        categoryMap.set(created.name_he, created.id)
-        if (created.icon) iconMap.set(created.name_he, created.icon)
-        categoryId = created.id
-        categoryIcon = created.icon ?? categoryIcon
+      const created = await sql`
+        INSERT INTO categories (user_id, name_he, icon)
+        VALUES (${user.id}, ${categoryName}, ${categoryIcon ?? null})
+        RETURNING id, name_he, icon
+      `
+      if (created[0]) {
+        categoryMap.set(created[0].name_he as string, created[0].id as string)
+        if (created[0].icon) iconMap.set(created[0].name_he as string, created[0].icon as string)
+        categoryId = created[0].id as string
+        categoryIcon = created[0].icon as string ?? categoryIcon
       }
     } else if (categoryIcon && !iconMap.has(categoryName)) {
-      // Existing category has no icon — update it
-      await supabase
-        .from('categories')
-        .update({ icon: categoryIcon })
-        .eq('id', categoryId)
-        .eq('user_id', user.id)
+      await sql`UPDATE categories SET icon = ${categoryIcon} WHERE id = ${categoryId} AND user_id = ${user.id}`
       iconMap.set(categoryName, categoryIcon)
     } else {
       categoryIcon = iconMap.get(categoryName) ?? null
     }
 
-    if (!categoryId) {
-      return Response.json({ error: 'שגיאה ביצירת קטגוריה' }, { status: 500 })
-    }
+    if (!categoryId) return Response.json({ error: 'שגיאה ביצירת קטגוריה' }, { status: 500 })
 
-    await supabase
-      .from('transactions')
-      .update({ category_id: categoryId })
-      .eq('id', transactionId)
-      .eq('user_id', user.id)
+    await sql`UPDATE transactions SET category_id = ${categoryId} WHERE id = ${transactionId} AND user_id = ${user.id}`
 
     return Response.json({ categorized: 1, categoryId, categoryName, categoryIcon, isNew })
   }
 
   // ── Batch mode ───────────────────────────────────────────────────────────
-  let query = supabase
-    .from('transactions')
-    .select('id, description, memo')
-    .is('category_id', null)
-    .eq('user_id', user.id)
-    .limit(200)
+  const transactions = await sql`
+    SELECT id, description, memo FROM transactions
+    WHERE category_id IS NULL
+      AND user_id = ${user.id}
+      AND (${bankAccountId ?? null}::uuid IS NULL OR bank_account_id = ${bankAccountId ?? null}::uuid)
+      AND (${since ?? null}::date IS NULL OR date >= ${since ?? null}::date)
+    LIMIT 200
+  `
 
-  if (bankAccountId) query = query.eq('bank_account_id', bankAccountId)
-  if (since) query = query.gte('date', since)
-
-  const { data: transactions, error: txError } = await query
-  if (txError) return Response.json({ error: 'שגיאה בטעינת עסקאות' }, { status: 500 })
-  if (!transactions?.length) return Response.json({ categorized: 0, newCategories: 0 })
+  if (!transactions.length) return Response.json({ categorized: 0, newCategories: 0 })
 
   let totalCategorized = 0
   let totalNewCategories = 0
@@ -159,56 +129,39 @@ export async function POST(req: NextRequest) {
       const { text } = await generateText({ model: MODEL, prompt })
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) result = JSON.parse(jsonMatch[0]) as Record<string, { name: string; icon: string }>
-    } catch (err) {
-      console.error('[categorize] batch AI error:', err)
+    } catch {
       continue
     }
 
-    // Create any new categories the AI suggested
-    for (const { name: categoryName, icon: categoryIcon } of Object.values(result)) {
-      if (!categoryName) continue
-      if (categoryMap.has(categoryName)) {
-        // Update icon if missing
-        if (categoryIcon && !iconMap.has(categoryName)) {
-          const id = categoryMap.get(categoryName)!
-          await supabase.from('categories').update({ icon: categoryIcon }).eq('id', id).eq('user_id', user.id)
-          iconMap.set(categoryName, categoryIcon)
+    for (const { name: catName, icon: catIcon } of Object.values(result)) {
+      if (!catName) continue
+      if (categoryMap.has(catName)) {
+        if (catIcon && !iconMap.has(catName)) {
+          const id = categoryMap.get(catName)!
+          await sql`UPDATE categories SET icon = ${catIcon} WHERE id = ${id} AND user_id = ${user.id}`
+          iconMap.set(catName, catIcon)
         }
         continue
       }
-
-      const { data: created } = await supabase
-        .from('categories')
-        .insert({ user_id: user.id, name_he: categoryName, icon: categoryIcon ?? null })
-        .select('id, name_he, icon')
-        .single()
-
-      if (created) {
-        categoryMap.set(created.name_he, created.id)
-        if (created.icon) iconMap.set(created.name_he, created.icon)
+      const created = await sql`
+        INSERT INTO categories (user_id, name_he, icon)
+        VALUES (${user.id}, ${catName}, ${catIcon ?? null})
+        RETURNING id, name_he, icon
+      `
+      if (created[0]) {
+        categoryMap.set(created[0].name_he as string, created[0].id as string)
+        if (created[0].icon) iconMap.set(created[0].name_he as string, created[0].icon as string)
         totalNewCategories++
       }
     }
 
-    // Apply categorizations
-    const updates = batch
-      .map((t, idx) => {
-        const entry = result[String(idx)]
-        const categoryName = entry?.name
-        const categoryId = categoryName ? categoryMap.get(categoryName) : undefined
-        return categoryId ? { id: t.id, category_id: categoryId } : null
-      })
-      .filter(Boolean) as Array<{ id: string; category_id: string }>
-
-    for (const update of updates) {
-      await supabase
-        .from('transactions')
-        .update({ category_id: update.category_id })
-        .eq('id', update.id)
-        .eq('user_id', user.id)
+    for (let idx = 0; idx < batch.length; idx++) {
+      const entry = result[String(idx)]
+      const catId = entry?.name ? categoryMap.get(entry.name) : undefined
+      if (!catId) continue
+      await sql`UPDATE transactions SET category_id = ${catId} WHERE id = ${batch[idx].id} AND user_id = ${user.id}`
+      totalCategorized++
     }
-
-    totalCategorized += updates.length
   }
 
   return Response.json({ categorized: totalCategorized, newCategories: totalNewCategories })

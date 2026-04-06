@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
 import { encrypt } from '@clearfin/crypto'
+import { requireUser } from '@/lib/auth-session'
 import { logCredentialAccess } from '@/lib/audit-log'
 
 const ParamsSchema = z.object({ id: z.string().uuid() })
@@ -15,9 +16,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid account id' }, { status: 400 })
@@ -29,70 +29,80 @@ export async function PATCH(
   const { id } = parsed.data
 
   // Ownership check
-  const { data: account } = await supabase
-    .from('bank_accounts').select('id').eq('id', id).eq('user_id', user.id).single()
+  const account = (await sql`
+    SELECT id FROM bank_accounts WHERE id = ${id} AND user_id = ${user.id}
+  `)[0]
   if (!account) return Response.json({ error: 'Not found' }, { status: 404 })
 
-  const updates: Record<string, unknown> = {}
+  try {
+    if (bodyParsed.data.displayName !== undefined && !bodyParsed.data.credentials) {
+      await sql`
+        UPDATE bank_accounts
+        SET display_name = ${bodyParsed.data.displayName}
+        WHERE id = ${id}
+      `
+    } else if (bodyParsed.data.credentials) {
+      const { ciphertext, iv, tag } = encrypt(
+        bodyParsed.data.credentials,
+        process.env.CREDENTIALS_ENCRYPTION_KEY!,
+      )
+      await sql`
+        UPDATE bank_accounts
+        SET
+          encrypted_credentials = ${ciphertext},
+          credentials_iv        = ${iv},
+          credentials_tag       = ${tag},
+          scrape_status         = 'idle',
+          scrape_error          = NULL
+          ${bodyParsed.data.displayName !== undefined
+            ? sql`, display_name = ${bodyParsed.data.displayName}`
+            : sql``}
+        WHERE id = ${id}
+      `
+      void logCredentialAccess({
+        userId: user.id,
+        bankAccountId: id,
+        action: 'updated',
+        triggeredBy: 'user',
+      })
+    }
 
-  if (bodyParsed.data.displayName !== undefined) {
-    updates.display_name = bodyParsed.data.displayName
+    return Response.json({ ok: true })
+  } catch {
+    return Response.json({ error: 'Failed to update account' }, { status: 500 })
   }
-
-  if (bodyParsed.data.credentials) {
-    const { ciphertext, iv, tag } = encrypt(
-      bodyParsed.data.credentials,
-      process.env.CREDENTIALS_ENCRYPTION_KEY!,
-    )
-    updates.encrypted_credentials = ciphertext
-    updates.credentials_iv = iv
-    updates.credentials_tag = tag
-    // Reset status so next scrape retries with new credentials
-    updates.scrape_status = 'idle'
-    updates.scrape_error = null
-  }
-
-  const { error } = await supabase.from('bank_accounts').update(updates).eq('id', id)
-  if (error) return Response.json({ error: 'Failed to update account' }, { status: 500 })
-
-  if (bodyParsed.data.credentials) {
-    void logCredentialAccess({
-      userId: user.id,
-      bankAccountId: id,
-      action: 'updated',
-      triggeredBy: 'user',
-    })
-  }
-
-  return Response.json({ ok: true })
 }
 
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const parsed = ParamsSchema.safeParse(await params)
   if (!parsed.success) return Response.json({ error: 'Invalid account id' }, { status: 400 })
 
   const { id } = parsed.data
 
-  const { data: account } = await supabase
-    .from('bank_accounts').select('id').eq('id', id).eq('user_id', user.id).single()
+  // Ownership check
+  const account = (await sql`
+    SELECT id FROM bank_accounts WHERE id = ${id} AND user_id = ${user.id}
+  `)[0]
   if (!account) return Response.json({ error: 'Not found' }, { status: 404 })
 
-  const { error } = await supabase.from('bank_accounts').delete().eq('id', id)
-  if (error) return Response.json({ error: 'Failed to delete account' }, { status: 500 })
+  try {
+    await sql`DELETE FROM bank_accounts WHERE id = ${id}`
 
-  void logCredentialAccess({
-    userId: user.id,
-    bankAccountId: id,
-    action: 'deleted',
-    triggeredBy: 'user',
-  })
+    void logCredentialAccess({
+      userId: user.id,
+      bankAccountId: id,
+      action: 'deleted',
+      triggeredBy: 'user',
+    })
 
-  return new Response(null, { status: 204 })
+    return new Response(null, { status: 204 })
+  } catch {
+    return Response.json({ error: 'Failed to delete account' }, { status: 500 })
+  }
 }

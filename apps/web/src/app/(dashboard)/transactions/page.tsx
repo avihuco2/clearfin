@@ -1,7 +1,8 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
+import { auth } from '@/lib/auth'
+import { sql } from '@clearfin/db/client'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { TransactionFilters } from '@/components/transaction-filters'
 import { CategorySelect } from '@/components/category-select'
@@ -63,51 +64,56 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<SearchParams>
 }) {
-  const sp = await searchParams
-  const supabase = createServerComponentClient({ cookies })
+  const session = await auth()
+  if (!session?.user?.id) redirect('/login')
 
+  const sp = await searchParams
+  const userId = session.user.id
   const offset = Math.max(0, parseInt(sp.offset ?? '0', 10) || 0)
 
-  // Fetch accounts and categories for filter controls + inline select
-  const [accountsResult, categoriesResult, uncatResult] = await Promise.all([
-    supabase
-      .from('bank_accounts')
-      .select('id, company_id, display_name, account_number')
-      .order('created_at', { ascending: false })
-      .returns<BankAccount[]>(),
-    supabase
-      .from('categories')
-      .select('id, name_he, name_en, icon, color')
-      .order('name_he', { ascending: true })
-      .returns<CategoryRaw[]>(),
-    supabase
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .is('category_id', null),
+  const accountId = sp.accountId ?? null
+  const categoryId = sp.categoryId ?? null
+  const from = sp.from ?? null
+  const to = sp.to ?? null
+
+  const [accounts, categoriesRaw, uncatRes, txRes] = await Promise.all([
+    sql<BankAccount[]>`
+      SELECT id, company_id, display_name, account_number
+      FROM bank_accounts
+      WHERE user_id = ${userId}
+      ORDER BY created_at DESC
+    `,
+    sql<CategoryRaw[]>`
+      SELECT id, name_he, name_en, icon, color
+      FROM categories
+      WHERE user_id IS NULL OR user_id = ${userId}
+      ORDER BY name_he ASC
+    `,
+    sql`
+      SELECT COUNT(*) FROM transactions
+      WHERE user_id = ${userId} AND category_id IS NULL
+    `,
+    sql<Transaction[]>`
+      SELECT id, date, description, charged_amount, charged_currency,
+             category_id, bank_account_id, status, sub_account
+      FROM transactions
+      WHERE user_id = ${userId}
+        AND (${accountId}::uuid IS NULL OR bank_account_id = ${accountId}::uuid)
+        AND (${categoryId}::uuid IS NULL OR category_id = ${categoryId}::uuid)
+        AND (${from}::date IS NULL OR date >= ${from}::date)
+        AND (${to}::date IS NULL OR date <= ${to}::date)
+      ORDER BY date DESC
+      LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
+    `,
   ])
 
-  // Build transactions query with filters
-  let query = supabase
-    .from('transactions')
-    .select(
-      'id, date, description, charged_amount, charged_currency, category_id, bank_account_id, status, sub_account',
-      { count: 'exact' },
-    )
-    .order('date', { ascending: false })
-    .range(offset, offset + PAGE_SIZE - 1)
+  const uncategorizedCount = Number(uncatRes[0]?.count ?? 0)
 
-  if (sp.accountId) query = query.eq('bank_account_id', sp.accountId)
-  if (sp.categoryId) query = query.eq('category_id', sp.categoryId)
-  if (sp.from) query = query.gte('date', sp.from)
-  if (sp.to) query = query.lte('date', sp.to)
+  // Use PAGE_SIZE+1 trick to determine if there's a next page
+  const hasNext = txRes.length > PAGE_SIZE
+  const transactions = hasNext ? txRes.slice(0, PAGE_SIZE) : txRes
+  const hasPrev = offset > 0
 
-  const { data: transactions, count, error } = await query.returns<Transaction[]>()
-
-  const accounts = accountsResult.data ?? []
-  const categoriesRaw = categoriesResult.data ?? []
-  const uncategorizedCount = uncatResult.count ?? 0
-
-  // Normalise categories — prefer name_he, fall back to name_en
   const categories: CategoryOption[] = categoriesRaw.map((c) => ({
     id: c.id,
     name_he: c.name_he ?? c.name_en ?? c.id,
@@ -115,18 +121,12 @@ export default async function TransactionsPage({
     color: c.color,
   }))
 
-  // Build lookup maps
   const accountMap = new Map<string, BankAccount>(accounts.map((a) => [a.id, a]))
 
-  // Filter-bar-compatible categories (id + name)
   const filterCategories = categoriesRaw.map((c) => ({
     id: c.id,
     name: c.name_he ?? c.name_en ?? c.id,
   }))
-
-  const totalCount = count ?? 0
-  const hasNext = offset + PAGE_SIZE < totalCount
-  const hasPrev = offset > 0
 
   function buildPageUrl(newOffset: number) {
     const params = new URLSearchParams()
@@ -145,8 +145,8 @@ export default async function TransactionsPage({
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-foreground)]">עסקאות</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-            {totalCount > 0
-              ? `${totalCount.toLocaleString('he-IL')} עסקאות`
+            {transactions.length > 0
+              ? `מציג ${offset + 1}–${offset + transactions.length}`
               : 'לא נמצאו עסקאות'}
           </p>
         </div>
@@ -154,23 +154,13 @@ export default async function TransactionsPage({
       </div>
 
       <CategoriesProvider initial={categories}>
-        {/* Filter controls — client component wrapped in Suspense for streaming */}
+        {/* Filter controls */}
         <Suspense fallback={<div className="h-24 animate-pulse rounded-xl bg-gray-100" />}>
           <TransactionFilters accounts={accounts} categories={filterCategories} />
         </Suspense>
 
-        {/* Error state */}
-        {error && (
-          <div
-            role="alert"
-            className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-          >
-            שגיאה בטעינת העסקאות. נסה לרענן את הדף.
-          </div>
-        )}
-
         {/* Empty state */}
-        {!error && transactions?.length === 0 && (
+        {transactions.length === 0 && (
           <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
             <p className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">אין עסקאות</p>
             <p className="mb-4 text-sm text-[var(--color-muted-foreground)]">
@@ -190,7 +180,7 @@ export default async function TransactionsPage({
         )}
 
         {/* Transactions table */}
-        {transactions && transactions.length > 0 && (
+        {transactions.length > 0 && (
           <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm" aria-label="טבלת עסקאות">
@@ -288,8 +278,7 @@ export default async function TransactionsPage({
             {(hasPrev || hasNext) && (
               <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3">
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  מציג {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} מתוך{' '}
-                  {totalCount.toLocaleString('he-IL')}
+                  מציג {offset + 1}–{offset + transactions.length}
                 </p>
                 <div className="flex gap-2">
                   {hasPrev && (

@@ -1,119 +1,92 @@
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 
 export const runtime = 'nodejs'
 
 export async function GET() {
-  const supabase = createServerClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const [
-    totalsResult,
-    byCategoryResult,
-    dailyTotalsResult,
-    topTransactionsResult,
-  ] = await Promise.all([
-    // totalSpent, transactionCount, uncategorizedCount — all scoped to current calendar month
-    supabase
-      .from('transactions')
-      .select('charged_amount, category_id')
-      .eq('user_id', user.id)
-      .gte('date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)),
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    .toISOString()
+    .slice(0, 10)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10)
 
-    // byCategory — JOIN categories, current month
-    supabase
-      .from('transactions')
-      .select('charged_amount, category_id, categories(id, name_he, color, icon)')
-      .eq('user_id', user.id)
-      .not('category_id', 'is', null)
-      .gte('date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)),
-
-    // dailyTotals — last 30 days
-    supabase
-      .from('transactions')
-      .select('date, charged_amount')
-      .eq('user_id', user.id)
-      .gte(
-        'date',
-        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      )
-      .order('date', { ascending: true }),
-
-    // topTransactions — top 5 by absolute charged_amount this month
-    supabase
-      .from('transactions')
-      .select('id, description, charged_amount, date, categories(name_he)')
-      .eq('user_id', user.id)
-      .gte('date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
-      .order('charged_amount', { ascending: true })
-      .limit(5),
+  const [totalsRows, byCategoryRows, dailyRows, topRows] = await Promise.all([
+    sql`
+      SELECT charged_amount, category_id
+      FROM transactions
+      WHERE user_id = ${user.id} AND date >= ${monthStart}
+    `,
+    sql`
+      SELECT t.charged_amount, t.category_id,
+             c.id AS cat_id, c.name_he, c.color, c.icon
+      FROM transactions t
+      LEFT JOIN categories c ON t.category_id = c.id
+      WHERE t.user_id = ${user.id}
+        AND t.category_id IS NOT NULL
+        AND t.date >= ${monthStart}
+    `,
+    sql`
+      SELECT date, charged_amount
+      FROM transactions
+      WHERE user_id = ${user.id} AND date >= ${thirtyDaysAgo}
+      ORDER BY date ASC
+    `,
+    sql`
+      SELECT t.id, t.description, t.charged_amount, t.date, c.name_he AS category_name_he
+      FROM transactions t
+      LEFT JOIN categories c ON t.category_id = c.id
+      WHERE t.user_id = ${user.id} AND t.date >= ${monthStart}
+      ORDER BY t.charged_amount ASC
+      LIMIT 5
+    `,
   ])
 
-  if (totalsResult.error) return Response.json({ error: 'Failed to fetch summary' }, { status: 500 })
-  if (byCategoryResult.error) return Response.json({ error: 'Failed to fetch category summary' }, { status: 500 })
-  if (dailyTotalsResult.error) return Response.json({ error: 'Failed to fetch daily totals' }, { status: 500 })
-  if (topTransactionsResult.error) return Response.json({ error: 'Failed to fetch top transactions' }, { status: 500 })
+  // totals
+  const totalSpent = totalsRows
+    .filter((r) => Number(r.charged_amount) < 0)
+    .reduce((sum, r) => sum + Number(r.charged_amount), 0)
+  const transactionCount = totalsRows.length
+  const uncategorizedCount = totalsRows.filter((r) => r.category_id === null).length
 
-  // ── totals ──────────────────────────────────────────────────────────────────
-  const rows = totalsResult.data ?? []
-  const totalSpent = rows
-    .filter((r) => r.charged_amount < 0)
-    .reduce((sum, r) => sum + r.charged_amount, 0)
-  const transactionCount = rows.length
-  const uncategorizedCount = rows.filter((r) => r.category_id === null).length
-
-  // ── byCategory ──────────────────────────────────────────────────────────────
-  const categoryMap = new Map<
-    string,
-    { categoryId: string; nameHe: string; color: string; icon: string; total: number }
-  >()
-  for (const row of byCategoryResult.data ?? []) {
-    const cat = (row.categories as unknown) as { id: string; name_he: string; color: string; icon: string } | null
-    if (!cat || !row.category_id) continue
-    const existing = categoryMap.get(row.category_id)
+  // byCategory
+  const categoryMap = new Map<string, { categoryId: string; nameHe: string; color: string; icon: string; total: number }>()
+  for (const row of byCategoryRows) {
+    if (!row.category_id) continue
+    const existing = categoryMap.get(row.category_id as string)
     if (existing) {
-      existing.total += row.charged_amount
+      existing.total += Number(row.charged_amount)
     } else {
-      categoryMap.set(row.category_id, {
-        categoryId: row.category_id,
-        nameHe: cat.name_he,
-        color: cat.color,
-        icon: cat.icon,
-        total: row.charged_amount,
+      categoryMap.set(row.category_id as string, {
+        categoryId: row.category_id as string,
+        nameHe: row.name_he as string,
+        color: row.color as string,
+        icon: row.icon as string,
+        total: Number(row.charged_amount),
       })
     }
   }
   const byCategory = Array.from(categoryMap.values())
 
-  // ── dailyTotals ─────────────────────────────────────────────────────────────
+  // dailyTotals
   const dailyMap = new Map<string, number>()
-  for (const row of dailyTotalsResult.data ?? []) {
-    const day = row.date.slice(0, 10)
-    dailyMap.set(day, (dailyMap.get(day) ?? 0) + row.charged_amount)
+  for (const row of dailyRows) {
+    const day = String(row.date).slice(0, 10)
+    dailyMap.set(day, (dailyMap.get(day) ?? 0) + Number(row.charged_amount))
   }
   const dailyTotals = Array.from(dailyMap.entries()).map(([date, total]) => ({ date, total }))
 
-  // ── topTransactions ──────────────────────────────────────────────────────────
-  const topTransactions = (topTransactionsResult.data ?? []).map((row) => {
-    const cat = (row.categories as unknown) as { name_he: string } | null
-    return {
-      id: row.id,
-      description: row.description,
-      chargedAmount: row.charged_amount,
-      date: row.date.slice(0, 10),
-      categoryNameHe: cat?.name_he ?? null,
-    }
-  })
+  // topTransactions
+  const topTransactions = topRows.map((row) => ({
+    id: row.id,
+    description: row.description,
+    chargedAmount: Number(row.charged_amount),
+    date: String(row.date).slice(0, 10),
+    categoryNameHe: row.category_name_he ?? null,
+  }))
 
-  return Response.json({
-    totalSpent,
-    transactionCount,
-    uncategorizedCount,
-    byCategory,
-    dailyTotals,
-    topTransactions,
-  })
+  return Response.json({ totalSpent, transactionCount, uncategorizedCount, byCategory, dailyTotals, topTransactions })
 }

@@ -1,6 +1,7 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { auth } from '@/lib/auth'
+import { sql } from '@clearfin/db/client'
 import { formatDate } from '@/lib/format'
 import { ScrapeButton } from '@/components/scrape-button'
 import { AccountActions } from '@/components/account-actions'
@@ -36,17 +37,17 @@ const STATUS_CONFIG: Record<ScrapeStatus, { label: string; bg: string; color: st
 }
 
 export default async function AccountsPage() {
-  const supabase = createServerComponentClient({ cookies })
+  const session = await auth()
+  if (!session?.user?.id) redirect('/login')
 
-  const { data: accounts, error } = await supabase
-    .from('bank_accounts')
-    .select(
-      'id, company_id, display_name, last_scraped_at, scrape_status, balance',
-    )
-    .order('created_at', { ascending: false })
-    .returns<BankAccount[]>()
+  const accounts = await sql<BankAccount[]>`
+    SELECT id, company_id, display_name, last_scraped_at, scrape_status, balance
+    FROM bank_accounts
+    WHERE user_id = ${session.user.id}
+    ORDER BY created_at DESC
+  `
 
-  const hasAccounts = !error && accounts && accounts.length > 0
+  const hasAccounts = accounts.length > 0
 
   return (
     <div className="space-y-6">
@@ -79,16 +80,6 @@ export default async function AccountsPage() {
         </Link>
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-        >
-          שגיאה בטעינת החשבונות. נסה לרענן את הדף.
-        </div>
-      )}
-
       {/* Account list */}
       {hasAccounts ? (
         <ul className="space-y-3" role="list" aria-label="רשימת חשבונות">
@@ -97,52 +88,50 @@ export default async function AccountsPage() {
           ))}
         </ul>
       ) : (
-        !error && (
-          /* Empty state */
-          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
-            <div className="mb-4 rounded-full bg-[var(--color-accent)] p-4 text-[var(--color-primary)]">
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <rect width="20" height="14" x="2" y="5" rx="2" />
-                <line x1="2" x2="22" y1="10" y2="10" />
-              </svg>
-            </div>
-            <h2 className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">
-              אין חשבונות מחוברים
-            </h2>
-            <p className="mb-6 max-w-xs text-sm text-[var(--color-muted-foreground)]">
-              חבר חשבון בנק או כרטיס אשראי כדי להתחיל לסנכרן עסקאות
-            </p>
-            <Link
-              href="/accounts/new"
-              className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+        /* Empty state */
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--color-border)] py-20 text-center">
+          <div className="mb-4 rounded-full bg-[var(--color-accent)] p-4 text-[var(--color-primary)]">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              חבר חשבון בנק
-            </Link>
+              <rect width="20" height="14" x="2" y="5" rx="2" />
+              <line x1="2" x2="22" y1="10" y2="10" />
+            </svg>
           </div>
-        )
+          <h2 className="mb-2 text-lg font-semibold text-[var(--color-foreground)]">
+            אין חשבונות מחוברים
+          </h2>
+          <p className="mb-6 max-w-xs text-sm text-[var(--color-muted-foreground)]">
+            חבר חשבון בנק או כרטיס אשראי כדי להתחיל לסנכרן עסקאות
+          </p>
+          <Link
+            href="/accounts/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            חבר חשבון בנק
+          </Link>
+        </div>
       )}
     </div>
   )
@@ -186,4 +175,3 @@ function AccountCard({ account }: { account: BankAccount }) {
     </li>
   )
 }
-

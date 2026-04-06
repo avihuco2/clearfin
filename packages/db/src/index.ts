@@ -11,7 +11,7 @@ export type ScrapeStatus = 'idle' | 'queued' | 'running' | 'awaiting_otp' | 'don
 
 export type TransactionType = 'normal' | 'installments' | 'standing_order';
 
-export type TransactionStatus = 'normal' | 'pending';
+export type TransactionStatus = 'completed' | 'pending';
 
 export type TriggeredBy = 'manual' | 'schedule';
 

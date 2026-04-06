@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 import { enqueueScrapeJob } from '@/lib/queue'
 
 const TriggerSchema = z.object({
@@ -8,9 +9,8 @@ const TriggerSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const parsed = TriggerSchema.safeParse(body)
@@ -18,25 +18,23 @@ export async function POST(req: NextRequest) {
 
   const { bankAccountId } = parsed.data
 
-  // Ownership check
-  const { data: account } = await supabase
-    .from('bank_accounts')
-    .select('id, scrape_status')
-    .eq('id', bankAccountId)
-    .eq('user_id', user.id)
-    .single()
+  const accounts = await sql`
+    SELECT id, scrape_status FROM bank_accounts
+    WHERE id = ${bankAccountId} AND user_id = ${user.id}
+  `
+  const account = accounts[0]
   if (!account) return Response.json({ error: 'Account not found' }, { status: 404 })
   if (account.scrape_status === 'running' || account.scrape_status === 'awaiting_otp') {
     return Response.json({ error: 'Scrape already in progress' }, { status: 409 })
   }
 
-  // Insert job record
-  const { data: job, error: jobError } = await supabase
-    .from('scrape_jobs')
-    .insert({ user_id: user.id, bank_account_id: bankAccountId, triggered_by: 'manual', status: 'queued' })
-    .select('id')
-    .single()
-  if (jobError || !job) return Response.json({ error: 'Failed to create job' }, { status: 500 })
+  const jobs = await sql`
+    INSERT INTO scrape_jobs (user_id, bank_account_id, triggered_by, status)
+    VALUES (${user.id}, ${bankAccountId}, 'manual', 'queued')
+    RETURNING id
+  `
+  const job = jobs[0]
+  if (!job) return Response.json({ error: 'Failed to create job' }, { status: 500 })
 
   await enqueueScrapeJob(user.id, bankAccountId, 'manual')
 

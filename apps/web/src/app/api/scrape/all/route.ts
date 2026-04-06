@@ -1,50 +1,34 @@
-import { createServerClient } from '@/lib/supabase/server'
+import { sql } from '@clearfin/db/client'
+import { requireUser } from '@/lib/auth-session'
 import { enqueueScrapeJob } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 
-/**
- * POST /api/scrape/all
- *
- * Enqueues a scrape job for every bank account that is not already running.
- * Can be called from the dashboard "Scrape All" button or programmatically:
- *
- *   curl -X POST https://clearfin-swart.vercel.app/api/scrape/all \
- *     -H "Cookie: <your session cookie>"
- */
 export async function POST() {
-  const supabase = createServerClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (!user || authError) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const user = await requireUser()
+  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: accounts, error } = await supabase
-    .from('bank_accounts')
-    .select('id')
-    .eq('user_id', user.id)
-    .not('scrape_status', 'in', '("running","awaiting_otp")')
+  const accounts = await sql`
+    SELECT id FROM bank_accounts
+    WHERE user_id = ${user.id}
+      AND scrape_status NOT IN ('running', 'awaiting_otp')
+  `
 
-  if (error) return Response.json({ error: 'Failed to fetch accounts' }, { status: 500 })
-  if (!accounts?.length) return Response.json({ enqueued: 0, message: 'אין חשבונות זמינים' })
+  if (!accounts.length) return Response.json({ enqueued: 0, message: 'אין חשבונות זמינים' })
 
-  const jobs: string[] = []
+  const jobIds: string[] = []
 
   for (const account of accounts) {
-    const { data: job } = await supabase
-      .from('scrape_jobs')
-      .insert({
-        user_id: user.id,
-        bank_account_id: account.id,
-        triggered_by: 'manual',
-        status: 'queued',
-      })
-      .select('id')
-      .single()
-
-    if (job) {
-      await enqueueScrapeJob(user.id, account.id, 'manual')
-      jobs.push(job.id)
+    const jobs = await sql`
+      INSERT INTO scrape_jobs (user_id, bank_account_id, triggered_by, status)
+      VALUES (${user.id}, ${account.id}, 'manual', 'queued')
+      RETURNING id
+    `
+    if (jobs[0]) {
+      await enqueueScrapeJob(user.id, account.id as string, 'manual')
+      jobIds.push(jobs[0].id as string)
     }
   }
 
-  return Response.json({ enqueued: jobs.length, jobIds: jobs }, { status: 202 })
+  return Response.json({ enqueued: jobIds.length, jobIds }, { status: 202 })
 }
