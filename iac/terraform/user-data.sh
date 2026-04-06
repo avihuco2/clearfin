@@ -129,8 +129,7 @@ module.exports = {
       name: 'clearfin-web',
       cwd: '/opt/clearfin/apps/web',
       script: 'node',
-      args: '.next/standalone/server.js',
-      env_file: '/opt/clearfin/.env',
+      args: '--env-file=/opt/clearfin/.env .next/standalone/server.js',
       env: {
         PORT: 3000,
         HOSTNAME: '0.0.0.0',
@@ -144,8 +143,7 @@ module.exports = {
       name: 'clearfin-worker',
       cwd: '/opt/clearfin/apps/worker',
       script: 'node',
-      args: 'bundle/index.mjs',
-      env_file: '/opt/clearfin/.env',
+      args: '--env-file=/opt/clearfin/.env bundle/index.mjs',
       env: {
         NODE_ENV: 'production',
         PUPPETEER_EXECUTABLE_PATH: '/usr/bin/google-chrome-stable',
