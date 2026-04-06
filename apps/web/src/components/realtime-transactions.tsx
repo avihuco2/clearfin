@@ -57,7 +57,7 @@ export function RealtimeTransactions({ userId }: RealtimeTransactionsProps) {
       const validated = data.filter(isValidTransaction)
       if (validated.length === 0) return
 
-      const topId = validated[0].id
+      const topId = validated[0]!.id
 
       // On first poll just record the baseline — don't announce existing transactions
       if (lastSeenIdRef.current === null) {

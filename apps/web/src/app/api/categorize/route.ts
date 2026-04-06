@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         categoryIcon = created[0].icon as string ?? categoryIcon
       }
     } else if (categoryIcon && !iconMap.has(categoryName)) {
-      await sql`UPDATE categories SET icon = ${categoryIcon} WHERE id = ${categoryId} AND user_id = ${user.id}`
+      await sql`UPDATE categories SET icon = ${categoryIcon} WHERE id = ${categoryId!} AND user_id = ${user.id}`
       iconMap.set(categoryName, categoryIcon)
     } else {
       categoryIcon = iconMap.get(categoryName) ?? null
@@ -159,7 +159,7 @@ export async function POST(req: NextRequest) {
       const entry = result[String(idx)]
       const catId = entry?.name ? categoryMap.get(entry.name) : undefined
       if (!catId) continue
-      await sql`UPDATE transactions SET category_id = ${catId} WHERE id = ${batch[idx].id} AND user_id = ${user.id}`
+      await sql`UPDATE transactions SET category_id = ${catId} WHERE id = ${batch[idx]!.id} AND user_id = ${user.id}`
       totalCategorized++
     }
   }

@@ -20,7 +20,7 @@ export default async function DashboardPage() {
   ])
 
   const accountCount = Number(accountsRes[0]?.count ?? 0)
-  const txRows = txRes as { charged_amount: number }[]
+  const txRows = txRes as unknown as { charged_amount: number }[]
   const txCount = txRows.length
   const pendingCount = Number(pendingRes[0]?.count ?? 0)
   const totalSpent = txRows.reduce((s, t) => s + (t.charged_amount ?? 0), 0)
