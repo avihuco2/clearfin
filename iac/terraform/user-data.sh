@@ -144,7 +144,7 @@ module.exports = {
       name: 'clearfin-worker',
       cwd: '/opt/clearfin/apps/worker',
       script: 'node',
-      args: 'dist/index.js',
+      args: 'bundle/index.mjs',
       env_file: '/opt/clearfin/.env',
       env: {
         NODE_ENV: 'production',

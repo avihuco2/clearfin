@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --experimental-vm-modules dist/index.js",
-    "build": "tsc",
+    "build": "tsc && node esbuild.config.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

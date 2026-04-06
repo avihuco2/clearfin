@@ -116,7 +116,7 @@ jobs:
             --exclude='apps/web/.next/cache' \
             apps/web/.next \
             apps/web/package.json \
-            apps/worker/dist \
+            apps/worker/bundle \
             apps/worker/package.json \
             package.json \
             package-lock.json \
