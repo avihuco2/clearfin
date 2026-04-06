@@ -129,7 +129,7 @@ module.exports = {
       name: 'clearfin-web',
       cwd: '/opt/clearfin/apps/web',
       script: 'node',
-      args: '--env-file=/opt/clearfin/.env .next/standalone/server.js',
+      args: '--env-file=/opt/clearfin/.env .next/standalone/apps/web/server.js',
       env: {
         PORT: 3000,
         HOSTNAME: '0.0.0.0',

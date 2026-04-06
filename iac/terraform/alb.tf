@@ -29,7 +29,7 @@ resource "aws_lb_target_group" "app" {
     unhealthy_threshold = 3
     timeout             = 5
     interval            = 30
-    matcher             = "200"
+    matcher             = "200-307"
   }
 
   tags = { Name = "clearfin-tg" }

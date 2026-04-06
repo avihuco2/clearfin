@@ -112,7 +112,6 @@ jobs:
           PUBLIC_ARG=""
           [ -d "apps/web/public" ] && PUBLIC_ARG="apps/web/public"
           tar -czf deploy.tar.gz \
-            --exclude='node_modules' \
             --exclude='apps/web/.next/cache' \
             apps/web/.next \
             apps/web/package.json \
@@ -150,6 +149,8 @@ jobs:
               'mkdir -p \$APP_DIR',
               'tar -xzf /tmp/deploy.tar.gz -C \$APP_DIR',
               'cd \$APP_DIR/apps/worker && rm -rf node_modules && PUPPETEER_SKIP_DOWNLOAD=true npm install --omit=dev 2>&1 | tail -5',
+              'cp -r \$APP_DIR/apps/web/.next/static \$APP_DIR/apps/web/.next/standalone/apps/web/.next/static',
+              'if [ -d \$APP_DIR/apps/web/public ]; then cp -r \$APP_DIR/apps/web/public \$APP_DIR/apps/web/.next/standalone/apps/web/public; fi',
               'chown -R \$APP_USER:\$APP_USER \$APP_DIR',
               'sudo -u \$APP_USER pm2 startOrReload \$APP_DIR/ecosystem.config.cjs --update-env',
               'sudo -u \$APP_USER pm2 save',
