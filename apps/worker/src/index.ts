@@ -40,6 +40,7 @@ async function pollAndProcess(): Promise<void> {
   if (activeJobs >= concurrency) return
 
   const slots = concurrency - activeJobs
+  type JobRow = { id: string; user_id: string; bank_account_id: string; triggered_by: string }
   const jobs = await sql`
     SELECT id, user_id, bank_account_id, triggered_by
     FROM scrape_jobs
@@ -48,7 +49,7 @@ async function pollAndProcess(): Promise<void> {
     LIMIT ${slots}
   `.catch((err: unknown) => {
     console.error('[poller] failed to fetch queued jobs:', err instanceof Error ? err.message : err)
-    return [] as typeof jobs
+    return [] as JobRow[]
   })
 
   if (!jobs.length) return
