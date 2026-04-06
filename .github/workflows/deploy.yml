@@ -150,27 +150,42 @@ jobs:
 
           echo "SSM Command ID: $COMMAND_ID"
 
-          # Wait for command to finish
-          for i in $(seq 1 60); do
-            STATUS=$(aws ssm get-command-invocation \
+          # Give SSM agent time to pick up the command before polling
+          sleep 30
+
+          # Wait for command to finish (use list-command-invocations — more reliable in il-central-1)
+          for i in $(seq 1 90); do
+            STATUS=$(aws ssm list-command-invocations \
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query "Status" \
-              --output text 2>/dev/null || echo "Pending")
-            echo "[$i/60] Status: $STATUS"
+              --query "CommandInvocations[0].Status" \
+              --output text 2>/dev/null)
+            # Empty or "None" means not yet registered
+            if [ -z "$STATUS" ] || [ "$STATUS" = "None" ] || [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ]; then
+              echo "[$i/90] Status: ${STATUS:-Pending}"
+              sleep 10
+              continue
+            fi
+            echo "[$i/90] Final status: $STATUS"
             if [ "$STATUS" = "Success" ]; then
-              echo "Deployment succeeded"
-              exit 0
-            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              aws ssm get-command-invocation \
+              echo "=== Deployment succeeded ==="
+              aws ssm list-command-invocations \
                 --command-id "$COMMAND_ID" \
                 --instance-id "$INSTANCE_ID" \
-                --query "StandardErrorContent" \
+                --details \
+                --query "CommandInvocations[0].CommandPlugins[0].Output" \
+                --output text
+              exit 0
+            else
+              aws ssm list-command-invocations \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$INSTANCE_ID" \
+                --details \
+                --query "CommandInvocations[0].CommandPlugins[0].Output" \
                 --output text
               echo "Deployment failed with status: $STATUS"
               exit 1
             fi
-            sleep 10
           done
           echo "Timed out waiting for SSM command"
           exit 1
