@@ -4,6 +4,7 @@ import Google from 'next-auth/providers/google'
 // Edge-compatible config — no Node.js built-ins (no pg, no crypto).
 // Used by middleware for JWT verification. Spread into auth.ts for the full config.
 export const authConfig = {
+  trustHost: true,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
