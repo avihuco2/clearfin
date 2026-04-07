@@ -9,6 +9,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  secret: process.env.NEXTAUTH_SECRET,
   adapter: PostgresAdapter(pool),
   session: { strategy: 'jwt' },
   events: {
