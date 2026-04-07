@@ -7,6 +7,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PostgresAdapter(pool),
+  session: { strategy: 'jwt' },
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -14,8 +15,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    session({ session, user }) {
-      session.user.id = user.id
+    // Persist the DB user ID into the JWT on first sign-in
+    async jwt({ token, user }) {
+      if (user?.id) token.id = user.id
+      return token
+    },
+    session({ session, token }) {
+      session.user.id = token.id as string
       return session
     },
   },
